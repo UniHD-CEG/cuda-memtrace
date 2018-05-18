@@ -16,17 +16,16 @@ __device__ void __mem_trace (
         uint64_t addr_val,
         uint32_t lane_id,
         uint32_t slot) {
-    uint64_t cta = blockIdx.x;
-    uint16_t ctay = blockIdx.y;
-    uint16_t ctaz = blockIdx.z;
-    cta  <<= 16;
-    cta  =  cta | ctay;
-    cta  <<= 16;
-    cta  =  cta | ctaz;
 
-    unsigned int idx;
+    uint64_t cta = blockIdx.x;
+    cta <<= 16;
+    cta |= blockIdx.y;
+    cta <<= 16;
+    cta |= blockIdx.z;
+
     uint32_t *i1 = &(__inx1[slot]);
     uint32_t *i2 = &(__inx2[slot]);
+    int offset = slot * __max_n;
 
     volatile uint32_t *vi2 = i2;
     int active   = __ballot(1); // get number of active threads 
@@ -39,8 +38,7 @@ __device__ void __mem_trace (
         while( *vi2 >= __max_n-95 || (id = atomicAdd(i1, n_active*3)) >= __max_n-95);
     }
 
-    idx = __shfl(id, lowest) + 3 * rlane_id;
-    int offset = slot * __max_n;
+    unsigned int idx = __shfl(id, lowest) + 3 * rlane_id;
     __dbuff[offset + idx]     = desc;
     __dbuff[offset + idx + 1] = addr_val;
     __dbuff[offset + idx + 2] = cta;

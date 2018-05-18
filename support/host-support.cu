@@ -78,8 +78,7 @@ public:
         abort();
       }
 
-      char recordSize = RECORD_SIZE;
-      fwrite(&recordSize, sizeof(char), 1, output);
+      fputc(RECORD_SIZE, output);
     }
 
   }
@@ -142,7 +141,7 @@ protected:
           unsigned int idx = *i2;
           fwrite(&(obj->TracesHost[offset]), RECORD_SIZE, idx, obj->output);
 
-          *i2=0;
+          *i2= 0;
           *i1= 0;
           // just to be safe...
           atomic_thread_fence(std::memory_order::memory_order_seq_cst);
