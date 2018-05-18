@@ -1,9 +1,5 @@
 set(LLVM_NO_RTTI 1)
 
-#target_include_directories(LLVMMemtrace PRIVATE
-#  "${LLVM_SOURCE_ROOT}/tools/clang/include"
-#  "${LLVM_BINARY_DIR}/tools/clang/include")
-
 add_llvm_loadable_module(LLVMMemtrace
   MemtracePass.cpp
   InstrumentHost.cpp

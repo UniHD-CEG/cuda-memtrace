@@ -49,6 +49,7 @@ struct InstrumentHost : public ModulePass {
 
     Constant *TraceFillInfo = nullptr;
     Constant *TraceCopyToSymbol = nullptr;
+    Constant *TraceTouch = nullptr;
     Constant *TraceStart = nullptr;
     Constant *TraceStop = nullptr;
 
@@ -77,6 +78,8 @@ struct InstrumentHost : public ModulePass {
           voidTy, cuStreamTy, stringTy, voidPtrTy);
       TraceStart = M.getOrInsertFunction("__trace_start",
           voidTy, cuStreamTy, stringTy);
+      TraceTouch = M.getOrInsertFunction("__trace_touch",
+          voidTy, cuStreamTy);
       TraceStop = M.getOrInsertFunction("__trace_stop",
           voidTy, cuStreamTy);
     }
@@ -171,6 +174,7 @@ struct InstrumentHost : public ModulePass {
       errs() << "  symbolName: " << kernelSymbolName << "\n";
 
       // insert preparational steps directly after cudaConfigureCall
+      // 0. touch consumer to create new one if necessary
       // 1. start/prepare trace consumer for stream
       // 2. get trace consumer info
       // 3. copy trace consumer info to device
@@ -183,6 +187,7 @@ struct InstrumentHost : public ModulePass {
       Value* kernelInfoSymbolVal = IRB.CreateGlobalStringPtr(kernelSymbolName);
       Value* streamPtr = IRB.CreatePointerCast(stream, IRB.getInt8PtrTy());
 
+      IRB.CreateCall(TraceTouch, {streamPtr});
       IRB.CreateCall(TraceStart, {streamPtr, kernelNameVal});
 
       const DataLayout &DL = configureCall->getParent()->getParent()->getParent()->getDataLayout();
