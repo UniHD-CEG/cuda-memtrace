@@ -10,10 +10,17 @@ typedef struct {
   uint32_t slot_size;
 } traceinfo_t;
 
-#define WARP_SIZE (32);
-#define SLOTS_SIZE (256 * 1024)
-#define SLOTS_NUM (4)
+// Size of a record in bytes, contents of a record:
+// 32 bit meta info, 32bit size, 64 bit address, 64 bit cta id
 #define RECORD_SIZE (24)
+// 6M buffer, devided into 4 parallel slots.
+// Buffers: SLOTS_NUM * SLOTS_SIZE * RECORD_SIZE
+// Absolute minimum is the warp size, all threads in a warp must collectively
+// wait or be able to write a record
+//#define SLOTS_SIZE (256 * 1024)
+#define testing
+#define SLOTS_SIZE (64)
+#define SLOTS_NUM (4)
 
 #ifdef INCLUDE_LLVM_MEMTRACE_STUFF
 

@@ -55,7 +55,7 @@ public:
   TraceConsumer(std::string suffix) {
     this->suffix = suffix;
 
-    cudaChecked(cudaHostAlloc(&TracesHost, SLOTS_NUM * SLOTS_SIZE * sizeof(uint64_t), cudaHostAllocMapped));
+    cudaChecked(cudaHostAlloc(&TracesHost, SLOTS_NUM * SLOTS_SIZE * RECORD_SIZE, cudaHostAllocMapped));
     cudaChecked(cudaHostGetDevicePointer(&TracesDevice, TracesHost, 0));
 
     cudaChecked(cudaHostAlloc(&FrontHost, SLOTS_NUM * sizeof(uint32_t), cudaHostAllocMapped));
@@ -78,7 +78,8 @@ public:
         abort();
       }
 
-      fputc(RECORD_SIZE, output);
+      fputc(0x19, output);
+      fputs("CUDATRACE", output);
     }
 
   }
@@ -96,7 +97,11 @@ public:
     always_assert(!shouldRun);
     shouldRun = true;
 
-    fprintf(output, "\n%s\n", name.c_str()); 
+    uint16_t nameSize = name.size();
+    fputc(0x00, output);
+    fwrite(&nameSize, 2, 1, output);
+    fwrite(name.c_str(), nameSize, 1, output);
+
     workerThread = std::thread(consume, this);
 
     while (!doesRun) {}
@@ -107,10 +112,6 @@ public:
     shouldRun = false;
     while (doesRun) {}
     workerThread.join();
-
-    char recordSeparator[RECORD_SIZE];
-    memset(recordSeparator, 0, RECORD_SIZE);
-    fwrite(recordSeparator, 1, RECORD_SIZE, output);
 
     // reset all buffers and pointers
     memset(TracesHost, 0, SLOTS_NUM * SLOTS_SIZE * sizeof(uint64_t));
@@ -128,32 +129,46 @@ public:
 protected:
 
   static void consume(TraceConsumer *obj) {
-    const uint32_t BufferThreshhold  = warpSize * 2;
+    const uint32_t BufferThreshhold  = warpSize;
 
     obj->doesRun = true;
 
+    // we cast this to a byte based buffer for less confusing access below
+    uint8_t *tracesBuf = (uint8_t*)obj->TracesHost;
+
+    uint32_t *fronts = obj->FrontHost;
+    uint32_t *backs = obj->BackHost;
+    FILE* sink = obj->output;
+
+
     while(obj->shouldRun) {
       for(int slot = 0; slot < SLOTS_NUM; slot++) {
-        volatile unsigned int *i1 = &(obj->FrontHost[slot]);
-        volatile unsigned int *i2 = &(obj->BackHost[slot]);
+        volatile unsigned int *i1 = &fronts[slot];
+        volatile unsigned int *i2 = &backs[slot];
         if (*i2 >= SLOTS_SIZE - BufferThreshhold) {
-          int offset = slot * SLOTS_SIZE;
+          size_t offset = slot * SLOTS_SIZE * RECORD_SIZE;
           unsigned int idx = *i2;
-          fwrite(&(obj->TracesHost[offset]), RECORD_SIZE, idx, obj->output);
+          for (unsigned int i = 0; i < idx; ++i) {
+            fputc(0xff, sink);
+            fwrite(&tracesBuf[offset + RECORD_SIZE * i], RECORD_SIZE, 1, sink);
+          }
 
-          *i2= 0;
-          *i1= 0;
+          *i2 = 0;
+          *i1 = 0;
           // just to be safe...
           atomic_thread_fence(std::memory_order::memory_order_seq_cst);
         }
       }
     }
-    //clear remainnig Buffers
+    //clear remaining Buffers
     for(int slot = 0; slot < SLOTS_NUM; slot++) {
-      volatile unsigned int *i2 = &(obj->BackHost[slot]);
+      volatile unsigned int *i2 = &backs[slot];
+      size_t offset = slot * SLOTS_SIZE * RECORD_SIZE;
       unsigned int idx = *i2;
-      int offset = slot * SLOTS_SIZE;
-      fwrite(&(obj->TracesHost[offset]), RECORD_SIZE, idx, obj->output);
+      for (unsigned int i = 0; i < idx; ++i) {
+        fputc(0xff, sink);
+        fwrite(&tracesBuf[offset + RECORD_SIZE * i], RECORD_SIZE, 1, sink);
+      }
       *i2=0;
     }
 

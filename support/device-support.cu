@@ -7,6 +7,7 @@ __device__ __inline__ uint32_t __rlaneid( unsigned int bitmap,int lane_id ) {
     return r_count;
 }
 
+extern "C"
 __device__ void __mem_trace (
         uint64_t* __dbuff,
         uint32_t* __inx1,

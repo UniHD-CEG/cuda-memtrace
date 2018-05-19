@@ -1,16 +1,37 @@
 // vim: ts=2 sts=2 sw=2 et ai
 #include <stdio.h>
+#include <string.h>
 #include <stdlib.h>
-#include <libgen.h>
 #include <inttypes.h>
+
+/** This tracedump uses the updated trace file format:
+ * The first ten bytes are:
+ * 0x19 0x43 0x55 0x44 0x41 0x54 0x52 0x41 0x43 0x45
+ *
+ * The file then consists of arbitrarily many kernel traces.
+ * A kernel trace consists of a kernel introduction followed by
+ * arbitrarily many trace records.
+ *
+ * Kernel introduction:
+ * first byte: 0x00
+ * next two bytes: length of kernel name (host byte order)
+ * next n bytes: kernel name
+ *
+ * Record:
+ * first byte: 0xFF
+ * next 24 bytes: memory dump of 3 x uint64_t
+ */
 
 #define die(...) do {\
   printf(__VA_ARGS__);\
   exit(1);\
 } while(0)
 
+#define RECORD_SIZE 24
+#define KERNEL_MAX_NAME 180
+
 typedef struct header_t {
-  int record_size;
+  int version;
 } header_t;
 
 typedef struct record_t {
@@ -19,47 +40,57 @@ typedef struct record_t {
   int64_t size;
 } record_t;
 
-#define KERNEL_MAX_NAME 180
 typedef struct kernel_t {
   char name[KERNEL_MAX_NAME];
 } kernel_t;
 
 int read_header(FILE *f, header_t *h) {
-  int ch = fgetc(f);
-  if (ch == EOF)
+  uint8_t ref[10] = {0x19, 0x43, 0x55, 0x44, 0x41, 0x54, 0x52, 0x41, 0x43, 0x45};
+  uint8_t buf[10];
+  if (fread(buf, 10, 1, f) != 1) {
     return 1;
-  h->record_size = ch;
+  }
+  for (int i = 0; i < 10; ++i) {
+    if (ref[i] != buf[i]) {
+      return 1;
+    }
+  }
+  h->version = 2;
   return 0;
 }
 
 int read_kernel(FILE *f, kernel_t *k) {
   int ch = fgetc(f);
-  while (ch != '\n' && ch != EOF) {
-    ch = fgetc(f);
-  }
-  if (ch == EOF)
+  if (ch != 0x00) {
+    fseek(f, -1, SEEK_CUR);
     return 1;
+  }
 
-  ch = fgetc(f);
-  int pos = 0;
-  while (ch != '\n' && ch != EOF) {
-    if (pos < KERNEL_MAX_NAME-1) {
-      k->name[pos] = ch;
-      pos += 1;
-    }
-    ch = fgetc(f);
-  }
-  k->name[pos] = '\0';
-  if (ch == EOF)
+  uint16_t nameLen;
+  if (fread(&nameLen, 2, 1, f) != 1) {
     return 1;
+  }
+  char name[nameLen];
+  if (fread(name, nameLen, 1, f) != 1) {
+    return 1;
+  }
+  nameLen = nameLen < KERNEL_MAX_NAME - 1 ? nameLen : KERNEL_MAX_NAME-1;
+  strncpy(k->name, name, nameLen);
+  k->name[nameLen] = '\0';
   return 0;
 }
 
 int read_record(FILE *f, record_t *r) {
-  uint64_t buf[3];
-  int obj_read = fread(buf, sizeof(uint64_t), 3, f);
-  if (obj_read != 3)
+  int ch = fgetc(f);
+  if (ch != 0xFF) {
+    fseek(f, -1, SEEK_CUR);
     return 1;
+  }
+
+  uint64_t buf[3];
+  if (fread(buf, RECORD_SIZE, 1, f) != 1) {
+    return 1;
+  }
   r->desc = buf[0];
   r->addr = buf[1];
   r->size = buf[2];
@@ -93,19 +124,16 @@ int main(int argc, char** argv) {
   header_t header;
   if (read_header(input, &header) != 0)
     die("unable to read header\n");
-  while (!feof(input)) {
+  while (1) {
     kernel_t kernel;
     record_t record;
     record.addr = 0xfffff;
     if (read_kernel(input, &kernel) != 0)
       break;
-    printf("kernel name: '%s'\n", kernel.name);
-    while (!feof(input)) {
+    printf("Kernel name: %s\n", kernel.name);
+    while (1) {
       if (read_record(input, &record) != 0)
-        die("unable to read record\n");
-      if (record.addr == 0) {
         break;
-      }
       num_records += 1;
       if (!quiet) {
         printf("  Record: 0x%" PRIx64 " 0x%" PRIx64 " 0x%" PRIx64 "\n",
@@ -115,6 +143,10 @@ int main(int argc, char** argv) {
   }
 
   printf("Read %" PRIu64 " records\n", num_records);
+
+  if (!feof(input)) {
+    printf("warning: unable to parse whole file\n");
+  }
 
   fclose(input);
 }

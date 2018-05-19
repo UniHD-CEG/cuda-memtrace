@@ -55,7 +55,7 @@ int main(int argc, char** argv) {
   uint32_t *backs = info.back;
   uint64_t *traces = info.slot;
 
-  for (int i = 0; i < 256; ++i) {
+  for (int i = 0; i < 3; ++i) {
     add_trace(fronts, backs, traces, 0, 3*i, 3*i + 1, 3*i + 2);
   }
 
