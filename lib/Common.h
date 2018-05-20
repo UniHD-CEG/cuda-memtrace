@@ -4,9 +4,9 @@
 
 // Reference type definition
 typedef struct {
-  uint32_t *front;  
-  uint32_t *back;
-  uint64_t *slot;
+  uint32_t *allocs;
+  uint32_t *commits;
+  uint8_t *records;
   uint32_t slot_size;
 } traceinfo_t;
 
@@ -18,9 +18,10 @@ typedef struct {
 // Absolute minimum is the warp size, all threads in a warp must collectively
 // wait or be able to write a record
 //#define SLOTS_SIZE (256 * 1024)
-#define testing
 #define SLOTS_SIZE (64)
 #define SLOTS_NUM (4)
+
+#define CACHELINE (64)
 
 #ifdef INCLUDE_LLVM_MEMTRACE_STUFF
 

@@ -20,17 +20,19 @@ void __trace_stop(cudaStream_t stream);
   }\
 } while(0)\
 
-void add_trace(uint32_t *fronts, uint32_t *backs, uint64_t *traces,
+void add_trace(uint32_t *allocs, uint32_t commits*, uint64_t *traces,
     int slot, uint64_t desc, uint64_t addr, uint64_t size) {
 
   while (fronts[slot] >= SLOTS_SIZE) {}
 
+  // only one writer
+  size_t 
   size_t offset = slot * SLOTS_SIZE + fronts[slot]*3;
-  fronts[slot]++;
+  allocs[slot]++;
   traces[offset + 0] = desc;
   traces[offset + 1] = addr;
   traces[offset + 2] = size;
-  backs[slot]++;
+  commits[slot]++;
 }
 
 int main(int argc, char** argv) {
@@ -51,12 +53,8 @@ int main(int argc, char** argv) {
   traceinfo_t info;
   __trace_fill_info(&info, NULL);
 
-  uint32_t *fronts = info.front;
-  uint32_t *backs = info.back;
-  uint64_t *traces = info.slot;
-
   for (int i = 0; i < 3; ++i) {
-    add_trace(fronts, backs, traces, 0, 3*i, 3*i + 1, 3*i + 2);
+    add_trace(info.allocs, info.commits, (uint64_t*)info.records, 0, 3*i, 3*i + 1, 3*i + 2);
   }
 
   printf("stopping trace\n");

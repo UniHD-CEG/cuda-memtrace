@@ -49,22 +49,46 @@ static std::string traceName(std::string id) {
  * - zero or more calls to start() ALWAYS followed by stop()
  * - one call to ~TraceConsumer()
  * Trying to repeatedly start or stop a consumer results in process termination.
+ *
+ * The queue is a multiple producer, single consumer key. Circular queues do not
+ * work as expected because we cannot reliably update the in-pointer with a single
+ * atomic operation. The result would be corrupted data as the host begins reading
+ * data that is falsely assumed to have been committed.
+ *
+ * Instead we use buffers that are alternatingly filled up by the GPU and cleared
+ * out by the CPU.
+ * Two pointers are associated with each buffer, an allocation and a commit pointer.
+ * A GPU warp first allocates spaces in the buffer using an atomic add on the
+ * allocation pointer, then writes its data and increases the commit buffer by the
+ * same amount, again using atomic add.
+ * The buffered is considered full 
+ * a) by the GPU if the allocation pointer is within 32 elements of capacity, and
+ * b) by the host if the commit pointer is within 32 elements of capacity.
+ * When the buffer is full, all elements are read by the host and the commit and
+ * allocation buffer are reset to 0 in this order.
+ * 
+ * Since a maximum of 1 warp is writing some of the last 32 elements, the commit
+ * pointer pointing in this area signals that all warps have written their data.
+ * 
+ * Several buffers, called "slots", exist in order to reduce contention.
+ *
+ * All pointers have a dedicated cache lane to avoid cache thrashing.
  */
 class TraceConsumer {
 public:
   TraceConsumer(std::string suffix) {
     this->suffix = suffix;
 
-    cudaChecked(cudaHostAlloc(&TracesHost, SLOTS_NUM * SLOTS_SIZE * RECORD_SIZE, cudaHostAllocMapped));
-    cudaChecked(cudaHostGetDevicePointer(&TracesDevice, TracesHost, 0));
+    cudaChecked(cudaHostAlloc(&RecordsHost, SLOTS_NUM * SLOTS_SIZE * RECORD_SIZE, cudaHostAllocMapped));
+    cudaChecked(cudaHostGetDevicePointer(&RecordsDevice, RecordsHost, 0));
 
-    cudaChecked(cudaHostAlloc(&FrontHost, SLOTS_NUM * sizeof(uint32_t), cudaHostAllocMapped));
-    cudaChecked(cudaHostGetDevicePointer(&FrontDevice, FrontHost, 0));
-    memset(FrontHost, 0, SLOTS_NUM * sizeof(uint32_t));
+    cudaChecked(cudaHostAlloc(&AllocsHost, SLOTS_NUM * CACHELINE, cudaHostAllocMapped));
+    cudaChecked(cudaHostGetDevicePointer(&AllocsDevice, AllocsHost, 0));
+    memset(AllocsHost, 0, SLOTS_NUM * CACHELINE);
 
-    cudaChecked(cudaHostAlloc(&BackHost, SLOTS_NUM * sizeof(uint32_t), cudaHostAllocMapped));
-    cudaChecked(cudaHostGetDevicePointer(&BackDevice, BackHost, 0));
-    memset(BackHost, 0, SLOTS_NUM * sizeof(uint32_t));
+    cudaChecked(cudaHostAlloc(&CommitsHost, SLOTS_NUM * CACHELINE, cudaHostAllocMapped));
+    cudaChecked(cudaHostGetDevicePointer(&CommitsDevice, CommitsHost, 0));
+    memset(CommitsHost, 0, SLOTS_NUM * CACHELINE);
 
     shouldRun = false;
     doesRun = false;
@@ -88,14 +112,20 @@ public:
     always_assert(!shouldRun);
     fclose(output);
 
-    cudaFreeHost(TracesHost);
-    cudaFreeHost(FrontHost);
-    cudaFreeHost(BackHost);
+    cudaFreeHost(RecordsHost);
+    cudaFreeHost(AllocsHost);
+    cudaFreeHost(CommitsHost);
   }
 
   void start(std::string name) {
     always_assert(!shouldRun);
     shouldRun = true;
+
+    // reset all buffers and pointers
+    memset(AllocsHost, 0, SLOTS_NUM * sizeof(uint32_t));
+    memset(CommitsHost, 0, SLOTS_NUM * sizeof(uint32_t));
+    // just for testing purposes
+    memset(RecordsHost, 0, SLOTS_NUM * SLOTS_SIZE * RECORD_SIZE);
 
     uint16_t nameSize = name.size();
     fputc(0x00, output);
@@ -112,64 +142,65 @@ public:
     shouldRun = false;
     while (doesRun) {}
     workerThread.join();
-
-    // reset all buffers and pointers
-    memset(TracesHost, 0, SLOTS_NUM * SLOTS_SIZE * sizeof(uint64_t));
-    memset(FrontHost, 0, SLOTS_NUM * sizeof(uint32_t));
-    memset(BackHost, 0, SLOTS_NUM * sizeof(uint32_t));
   }
 
   void fillTraceinfo(traceinfo_t *info) {
-    info->front = FrontDevice;
-    info->back = BackDevice;
-    info->slot = TracesDevice;
+    info->allocs = AllocsDevice;
+    info->commits = CommitsDevice;
+    info->records = RecordsDevice;
     info->slot_size = SLOTS_SIZE;
   }
 
 protected:
 
-  static void consume(TraceConsumer *obj) {
-    const uint32_t BufferThreshhold  = warpSize;
+  // clear up a slot if it is full
+  static void consumeSlot(uint32_t *allocPtr, uint32_t *commitPtr, uint8_t *recordsPtr,
+      FILE* out, bool onlyFull) {
+    // commits is written by threads on the GPU, so we need it volatile
+    volatile uint32_t *vcommit = commitPtr;
 
+    // in kernel is still active we only want to read full slots
+    if (onlyFull && *vcommit <= SLOTS_SIZE - 32) {
+      return;
+    }
+
+    // we know everything stopped, so we avoid using the volatile reference
+    // in the end condition
+    uint32_t numRecords = *vcommit;
+    for (int32_t i = 0; i < numRecords; ++i) {
+      fputc(0xff, out);
+      fwrite(&recordsPtr[i * RECORD_SIZE], RECORD_SIZE, 1, out);
+    }
+
+    // write commits 
+    *commitPtr = 0;
+    // ensure commits are reset first
+    std::atomic_thread_fence(std::memory_order_release);
+    *allocPtr = 0;
+  }
+
+  // payload function of queue consumer
+  static void consume(TraceConsumer *obj) {
     obj->doesRun = true;
 
-    // we cast this to a byte based buffer for less confusing access below
-    uint8_t *tracesBuf = (uint8_t*)obj->TracesHost;
+    uint8_t *records = obj->RecordsHost;
+    uint32_t *allocs = obj->AllocsHost;
+    uint32_t *commits = obj->CommitsHost;
 
-    uint32_t *fronts = obj->FrontHost;
-    uint32_t *backs = obj->BackHost;
     FILE* sink = obj->output;
-
 
     while(obj->shouldRun) {
       for(int slot = 0; slot < SLOTS_NUM; slot++) {
-        volatile unsigned int *i1 = &fronts[slot];
-        volatile unsigned int *i2 = &backs[slot];
-        if (*i2 >= SLOTS_SIZE - BufferThreshhold) {
-          size_t offset = slot * SLOTS_SIZE * RECORD_SIZE;
-          unsigned int idx = *i2;
-          for (unsigned int i = 0; i < idx; ++i) {
-            fputc(0xff, sink);
-            fwrite(&tracesBuf[offset + RECORD_SIZE * i], RECORD_SIZE, 1, sink);
-          }
-
-          *i2 = 0;
-          *i1 = 0;
-          // just to be safe...
-          atomic_thread_fence(std::memory_order::memory_order_seq_cst);
-        }
+        uint32_t offset = slot * SLOTS_SIZE * RECORD_SIZE;
+        consumeSlot(&allocs[slot], &commits[slot], &records[offset], sink, true);
       }
     }
-    //clear remaining Buffers
+
+    // after shouldRun flag has been reset to false, no warps are writing, but
+    // there might still be data in the buffers
     for(int slot = 0; slot < SLOTS_NUM; slot++) {
-      volatile unsigned int *i2 = &backs[slot];
-      size_t offset = slot * SLOTS_SIZE * RECORD_SIZE;
-      unsigned int idx = *i2;
-      for (unsigned int i = 0; i < idx; ++i) {
-        fputc(0xff, sink);
-        fwrite(&tracesBuf[offset + RECORD_SIZE * i], RECORD_SIZE, 1, sink);
-      }
-      *i2=0;
+      uint32_t offset = slot * SLOTS_SIZE * RECORD_SIZE;
+      consumeSlot(&allocs[slot], &commits[slot], &records[offset], sink, false);
     }
 
     obj->doesRun = false;
@@ -185,9 +216,9 @@ protected:
   std::thread       workerThread;
   std::string       pipeName;
 
-  uint32_t *FrontHost, *FrontDevice;
-  uint32_t *BackHost, *BackDevice;
-  uint64_t *TracesHost, *TracesDevice;
+  uint32_t *AllocsHost, *AllocsDevice;
+  uint32_t *CommitsHost, *CommitsDevice;
+  uint8_t *RecordsHost, *RecordsDevice;
 };
 
 /*******************************************************************************
