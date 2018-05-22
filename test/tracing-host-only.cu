@@ -20,19 +20,22 @@ void __trace_stop(cudaStream_t stream);
   }\
 } while(0)\
 
-void add_trace(uint32_t *allocs, uint32_t commits*, uint64_t *traces,
-    int slot, uint64_t desc, uint64_t addr, uint64_t size) {
+void add_trace(uint8_t *allocs, uint8_t *commits, uint64_t *traces,
+    int slot, uint64_t desc, uint64_t addr, uint64_t cta) {
 
-  while (fronts[slot] >= SLOTS_SIZE) {}
+  volatile uint32_t *alloc = (uint32_t*)(&allocs[slot * CACHELINE]);
+  volatile uint32_t *commit = (uint32_t*)(&commits[slot * CACHELINE]);
 
-  // only one writer
-  size_t 
-  size_t offset = slot * SLOTS_SIZE + fronts[slot]*3;
-  allocs[slot]++;
-  traces[offset + 0] = desc;
-  traces[offset + 1] = addr;
-  traces[offset + 2] = size;
-  commits[slot]++;
+  while (*alloc > SLOTS_SIZE - 32) {}
+
+  // only one writer, so everything super relaxed here
+  *alloc += 1;
+  size_t offset = slot * SLOTS_SIZE + (*alloc) * 3;
+  record_t *record = (record_t*)&traces[offset];
+  record->desc = desc;
+  record->addr = addr;
+  record->cta  = cta;
+  *commit += 1; 
 }
 
 int main(int argc, char** argv) {
@@ -52,6 +55,8 @@ int main(int argc, char** argv) {
   __trace_start(NULL, "test");
   traceinfo_t info;
   __trace_fill_info(&info, NULL);
+
+  cudaChecked(cudaStreamSynchronize(NULL));
 
   for (int i = 0; i < 3; ++i) {
     add_trace(info.allocs, info.commits, (uint64_t*)info.records, 0, 3*i, 3*i + 1, 3*i + 2);

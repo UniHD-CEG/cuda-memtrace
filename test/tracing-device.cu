@@ -1,6 +1,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <curand.h>
+#include <curand_kernel.h>
 #include "../lib/Common.h"
 
 #define cudaChecked(code) do {\
@@ -18,66 +20,50 @@ void __trace_start(cudaStream_t stream, const char *kernel_name);
 void __trace_fill_info(const void *info, cudaStream_t stream);
 void __trace_copy_to_symbol(cudaStream_t stream, const char* symbol, const void *info);
 void __trace_stop(cudaStream_t stream);
-//__device__ void __mem_trace (uint64_t* __dbuff, uint32_t* __inx1,
-//    uint32_t* __inx2, uint32_t __max_n, uint64_t desc,
-//    uint64_t addr_val, uint32_t lane_id, uint32_t slot);
 }
 
-struct record_t {
-  uint64_t desc;
-  uint64_t addr;
-  uint64_t cta;
-};
-
 extern "C"
-__device__ void __mem_trace (
-        uint8_t* records,
-        uint32_t* allocs,
-        uint32_t* commits,
-        uint64_t desc,
-        uint64_t addr,
-        uint32_t slot) {
-
+__device__ void __mem_trace (uint8_t* records, uint8_t* allocs, uint8_t* commits,
+        uint64_t desc, uint64_t addr, uint32_t slot) {
     uint64_t cta = blockIdx.x;
     cta <<= 16;
     cta |= blockIdx.y;
     cta <<= 16;
     cta |= blockIdx.z;
 
-    uint32_t *alloc = &allocs[slot];
-    uint32_t *commit = &commits[slot];
-
+    uint32_t lane_id;
+    asm volatile ("mov.u32 %0, %%laneid;" : "=r"(lane_id));
 
     uint32_t active   = __ballot(1); // get number of active threads 
-    // relative lane id, i.e. how many threads with lower ids are active in this warp?
+    uint32_t rlane_id = __popc(active << (32 - lane_id));
     uint32_t n_active = __popc(active);
     uint32_t lowest   = __ffs(active)-1;
 
-    uint32_t lane_id;
-    asm volatile ("mov.u32 %0, %%laneid;" : "=r"(lane_id));
-    uint32_t rlane_id = __popc(active << (32 - lane_id));
+    uint32_t *alloc = (uint32_t*)(&allocs[slot * CACHELINE]);
+    uint32_t *commit = (uint32_t*)(&commits[slot * CACHELINE]);
 
     volatile uint32_t *valloc = alloc;
-    uint32_t id =0;
+    volatile uint32_t *vcommit = commit;
+    unsigned int id = 0;
+
     if (lane_id == lowest) {
-        while( *valloc > (SLOTS_SIZE - 32) || (id = atomicAdd(alloc, n_active)) > (SLOTS_SIZE - 32));
+      while(*valloc > (SLOTS_SIZE - 32) || (id = atomicAdd(alloc, n_active)) > (SLOTS_SIZE - 32)) {
+        (void)0;
+      }
     }
 
     uint32_t slot_offset = slot * SLOTS_SIZE;
     uint32_t record_offset = __shfl(id, lowest) + rlane_id;
-    uint32_t byte_offset = (slot_offset + record_offset) * RECORD_SIZE;
-
-    record_t *record = (record_t*)(records + byte_offset);
+    record_t *record = (record_t*) &(records[(slot_offset + record_offset) * RECORD_SIZE]);
     record->desc = desc;
     record->addr = addr;
     record->cta  = cta;
+    __threadfence_system(); 
 
     if (lane_id == lowest ) atomicAdd(commit, n_active);
-    __threadfence_system(); 
-    return;
 }
 
-__global__ void test_kernel(uint8_t* records, uint32_t* allocs, uint32_t* commits, int n) {
+__global__ void test_kernel(uint8_t* records, uint8_t* allocs, uint8_t* commits, int n) {
   int gid = blockIdx.x * blockDim.x + threadIdx.x;
   if (gid % 2 == 0)
     return;
@@ -114,8 +100,8 @@ int main(int argc, char** argv) {
   traceinfo_t info;
   __trace_fill_info(&info, NULL);
 
-  uint32_t *allocs = info.allocs;
-  uint32_t *commits = info.commits;
+  uint8_t *allocs = info.allocs;
+  uint8_t *commits = info.commits;
   uint8_t *records = info.records;
   test_kernel<<<1, threads>>>(records, allocs, commits, rounds);
   cudaChecked(cudaDeviceSynchronize());

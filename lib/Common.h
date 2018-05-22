@@ -4,11 +4,17 @@
 
 // Reference type definition
 typedef struct {
-  uint32_t *allocs;
-  uint32_t *commits;
+  uint8_t *allocs;
+  uint8_t *commits;
   uint8_t *records;
   uint32_t slot_size;
 } traceinfo_t;
+
+typedef struct record_t {
+  int64_t desc;
+  int64_t addr;
+  int64_t cta;
+} record_t;
 
 // Size of a record in bytes, contents of a record:
 // 32 bit meta info, 32bit size, 64 bit address, 64 bit cta id

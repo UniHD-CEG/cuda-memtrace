@@ -3,6 +3,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <inttypes.h>
+#include "../lib/Common.h"
 
 /** This tracedump uses the updated trace file format:
  * The first ten bytes are:
@@ -27,18 +28,11 @@
   exit(1);\
 } while(0)
 
-#define RECORD_SIZE 24
 #define KERNEL_MAX_NAME 180
 
 typedef struct header_t {
   int version;
 } header_t;
-
-typedef struct record_t {
-  int64_t desc;
-  int64_t addr;
-  int64_t size;
-} record_t;
 
 typedef struct kernel_t {
   char name[KERNEL_MAX_NAME];
@@ -61,6 +55,9 @@ int read_header(FILE *f, header_t *h) {
 
 int read_kernel(FILE *f, kernel_t *k) {
   int ch = fgetc(f);
+  if (ch == EOF) {
+    return 1;
+  }
   if (ch != 0x00) {
     fseek(f, -1, SEEK_CUR);
     return 1;
@@ -82,6 +79,9 @@ int read_kernel(FILE *f, kernel_t *k) {
 
 int read_record(FILE *f, record_t *r) {
   int ch = fgetc(f);
+  if (ch == EOF) {
+    return 1;
+  }
   if (ch != 0xFF) {
     fseek(f, -1, SEEK_CUR);
     return 1;
@@ -93,7 +93,7 @@ int read_record(FILE *f, record_t *r) {
   }
   r->desc = buf[0];
   r->addr = buf[1];
-  r->size = buf[2];
+  r->cta = buf[2];
   return 0;
 }
 
@@ -137,7 +137,7 @@ int main(int argc, char** argv) {
       num_records += 1;
       if (!quiet) {
         printf("  Record: 0x%" PRIx64 " 0x%" PRIx64 " 0x%" PRIx64 "\n",
-            record.desc, record.addr, record.size);
+            record.desc, record.addr, record.cta);
       }
     }
   }

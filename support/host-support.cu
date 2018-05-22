@@ -72,7 +72,7 @@ static std::string traceName(std::string id) {
  * 
  * Several buffers, called "slots", exist in order to reduce contention.
  *
- * All pointers have a dedicated cache lane to avoid cache thrashing.
+ * Allocation and commit pointers are uint32_t with 64 Byte padding to avoid cache thrashing.
  */
 class TraceConsumer {
 public:
@@ -95,16 +95,14 @@ public:
 
     pipeName = traceName(suffix);
 
+    output = fopen(this->pipeName.c_str(), "wb");
     if (output == nullptr) {
-      output = fopen(this->pipeName.c_str(), "wb");
-      if (output == nullptr) {
-        printf("unable to open trace file '%s' for writing\n", pipeName.c_str());
-        abort();
-      }
-
-      fputc(0x19, output);
-      fputs("CUDATRACE", output);
+      printf("unable to open trace file '%s' for writing\n", pipeName.c_str());
+      abort();
     }
+
+    fputc(0x19, output);
+    fputs("CUDATRACE", output);
 
   }
 
@@ -122,8 +120,8 @@ public:
     shouldRun = true;
 
     // reset all buffers and pointers
-    memset(AllocsHost, 0, SLOTS_NUM * sizeof(uint32_t));
-    memset(CommitsHost, 0, SLOTS_NUM * sizeof(uint32_t));
+    memset(AllocsHost, 0, SLOTS_NUM * CACHELINE);
+    memset(CommitsHost, 0, SLOTS_NUM * CACHELINE);
     // just for testing purposes
     memset(RecordsHost, 0, SLOTS_NUM * SLOTS_SIZE * RECORD_SIZE);
 
@@ -153,54 +151,67 @@ public:
 
 protected:
 
-  // clear up a slot if it is full
-  static void consumeSlot(uint32_t *allocPtr, uint32_t *commitPtr, uint8_t *recordsPtr,
-      FILE* out, bool onlyFull) {
-    // commits is written by threads on the GPU, so we need it volatile
-    volatile uint32_t *vcommit = commitPtr;
+  static uint64_t rdtsc(){
+    unsigned int lo,hi;
+    __asm__ __volatile__ ("rdtsc" : "=a" (lo), "=d" (hi));
+    return ((uint64_t)hi << 32) | lo;
+  }
 
-    // in kernel is still active we only want to read full slots
-    if (onlyFull && *vcommit <= SLOTS_SIZE - 32) {
+  // clear up a slot if it is full
+  static void consumeSlot(uint8_t *allocPtr, uint8_t *commitPtr, uint8_t *recordsPtr,
+      FILE* out, bool onlyFull) {
+    // allocs/commits is written by threads on the GPU, so we need it volatile
+    volatile uint32_t *vcommit = (uint32_t*)commitPtr;
+    volatile uint32_t *valloc = (uint32_t*)allocPtr;
+
+    
+    // if kernel is still active we only want to read full slots
+    uint32_t numRecords = *vcommit;
+    if (onlyFull && !(numRecords > SLOTS_SIZE - 32)) {
       return;
     }
 
     // we know everything stopped, so we avoid using the volatile reference
     // in the end condition
-    uint32_t numRecords = *vcommit;
     for (int32_t i = 0; i < numRecords; ++i) {
       fputc(0xff, out);
       fwrite(&recordsPtr[i * RECORD_SIZE], RECORD_SIZE, 1, out);
     }
 
-    // write commits 
-    *commitPtr = 0;
+    *vcommit = 0;
     // ensure commits are reset first
     std::atomic_thread_fence(std::memory_order_release);
-    *allocPtr = 0;
+    *valloc = 0;
   }
 
   // payload function of queue consumer
   static void consume(TraceConsumer *obj) {
     obj->doesRun = true;
 
+    uint8_t *allocs = obj->AllocsHost;
+    uint8_t *commits = obj->CommitsHost;
     uint8_t *records = obj->RecordsHost;
-    uint32_t *allocs = obj->AllocsHost;
-    uint32_t *commits = obj->CommitsHost;
 
     FILE* sink = obj->output;
 
     while(obj->shouldRun) {
       for(int slot = 0; slot < SLOTS_NUM; slot++) {
-        uint32_t offset = slot * SLOTS_SIZE * RECORD_SIZE;
-        consumeSlot(&allocs[slot], &commits[slot], &records[offset], sink, true);
+        uint32_t allocs_offset = slot * CACHELINE;
+        uint32_t commits_offset = slot * CACHELINE;
+        uint32_t records_offset = slot * SLOTS_SIZE * RECORD_SIZE;
+        consumeSlot(&allocs[allocs_offset], &commits[commits_offset],
+            &records[records_offset], sink, true);
       }
     }
 
     // after shouldRun flag has been reset to false, no warps are writing, but
     // there might still be data in the buffers
     for(int slot = 0; slot < SLOTS_NUM; slot++) {
-      uint32_t offset = slot * SLOTS_SIZE * RECORD_SIZE;
-      consumeSlot(&allocs[slot], &commits[slot], &records[offset], sink, false);
+      uint32_t allocs_offset = slot * CACHELINE;
+      uint32_t commits_offset = slot * CACHELINE;
+      uint32_t records_offset = slot * SLOTS_SIZE * RECORD_SIZE;
+        consumeSlot(&allocs[allocs_offset], &commits[commits_offset],
+            &records[records_offset], sink, false);
     }
 
     obj->doesRun = false;
@@ -216,8 +227,8 @@ protected:
   std::thread       workerThread;
   std::string       pipeName;
 
-  uint32_t *AllocsHost, *AllocsDevice;
-  uint32_t *CommitsHost, *CommitsDevice;
+  uint8_t *AllocsHost, *AllocsDevice;
+  uint8_t *CommitsHost, *CommitsDevice;
   uint8_t *RecordsHost, *RecordsDevice;
 };
 
