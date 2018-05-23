@@ -32,6 +32,10 @@
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/Support/raw_ostream.h"
 
+#include "llvm/PassRegistry.h"
+#include "llvm/IR/LegacyPassManager.h"
+#include "llvm/Transforms/IPO/PassManagerBuilder.h"
+
 #define DEBUG_TYPE "memtrace-host"
 
 using namespace llvm;
@@ -59,8 +63,9 @@ struct InstrumentHost : public ModulePass {
      * complain in tests.
      *
      * Reference:
-     * void __trace_fill_info(const void *info, cudaStream_t stream)
-     * void __trace_copy_to_symbol(cudaStream_t stream, const char* symbol, const void *info)
+     * void __trace_fill_info(const void *info, cudaStream_t stream);
+     * void __trace_copy_to_symbol(cudaStream_t stream, const char* symbol, const void *info);
+     * void __trace_touch(cudaStream_t stream);
      * void __trace_start(cudaStream_t stream, const char *kernel_name);
      * void __trace_stop(cudaStream_t stream);
      */
@@ -76,10 +81,10 @@ struct InstrumentHost : public ModulePass {
           voidTy, voidPtrTy, cuStreamTy);
       TraceCopyToSymbol = M.getOrInsertFunction("__trace_copy_to_symbol",
           voidTy, cuStreamTy, stringTy, voidPtrTy);
-      TraceStart = M.getOrInsertFunction("__trace_start",
-          voidTy, cuStreamTy, stringTy);
       TraceTouch = M.getOrInsertFunction("__trace_touch",
           voidTy, cuStreamTy);
+      TraceStart = M.getOrInsertFunction("__trace_start",
+          voidTy, cuStreamTy, stringTy);
       TraceStop = M.getOrInsertFunction("__trace_stop",
           voidTy, cuStreamTy);
     }
@@ -140,7 +145,6 @@ struct InstrumentHost : public ModulePass {
         return "anonymous";
       }
 
-      errs() << "launch: " << *launch << "\n";
       StringRef calledFunctionName = launch->getCalledFunction()->getName();
 
       // for kernel launch, return name of first operand
@@ -167,11 +171,6 @@ struct InstrumentHost : public ModulePass {
       assert(configureCall->getNumArgOperands() == 6);
       auto *stream = configureCall->getArgOperand(5);
       std::string kernelSymbolName = getSymbolNameForKernel(kernelName);
-
-      errs() << "patching kernel launch: " << *configureCall << "\n";
-      errs() << "  name: "   << kernelName << "\n";
-      errs() << "  stream: " << *stream << "\n";
-      errs() << "  symbolName: " << kernelSymbolName << "\n";
 
       // insert preparational steps directly after cudaConfigureCall
       // 0. touch consumer to create new one if necessary
@@ -212,7 +211,6 @@ struct InstrumentHost : public ModulePass {
 
       Function* cudaConfigureCall = M.getFunction("cudaConfigureCall");
       if (cudaConfigureCall == nullptr) {
-        errs() << "no configure calls\n";
         return false;
       }
 
@@ -223,10 +221,6 @@ struct InstrumentHost : public ModulePass {
         if (auto *call = dyn_cast<CallInst>(user)) {
           patchKernelCall(call);
         }
-
-        //if (auto *call = dyn_cast<InvokeInst>(user)) {
-        //  patchKernelCall(call);
-        //}
       }
 
       return true;
@@ -236,3 +230,12 @@ struct InstrumentHost : public ModulePass {
 char InstrumentHost::ID = 0;
 
 static RegisterPass<InstrumentHost> X("memtrace-host", "inserts host-side instrumentation for mem-traces", false, false);
+
+// This enables Autoregistration of the Pass
+static void registerTracePass(const PassManagerBuilder &,legacy::PassManagerBase &PM) {
+    PM.add(new InstrumentHost);
+}
+static RegisterStandardPasses RegisterTracePass(
+    PassManagerBuilder::EP_OptimizerLast, registerTracePass);
+static RegisterStandardPasses RegisterTracePass0(
+    PassManagerBuilder::EP_EnabledOnOptLevel0, registerTracePass);
