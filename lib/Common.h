@@ -25,6 +25,7 @@ typedef struct record_t {
 // wait or be able to write a record
 //#define SLOTS_SIZE (256 * 1024)
 #define SLOTS_SIZE (64)
+// Number of slots must be power of two!
 #define SLOTS_NUM (4)
 
 #define CACHELINE (64)

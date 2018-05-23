@@ -43,21 +43,15 @@ Constant *getOrInsertTraceDecl(Module &M) {
   LLVMContext &ctx = M.getContext();
 
   Type *voidTy = Type::getVoidTy(ctx);
+  Type *i8PtrTy = Type::getInt8PtrTy(ctx);
   Type *i64Ty = Type::getInt64Ty(ctx);
-  Type *i64PtrTy = Type::getInt64PtrTy(ctx);
-
   Type *i32Ty = Type::getInt32Ty(ctx);
-  Type *i32PtrTy = Type::getInt32PtrTy(ctx);
 
   return M.getOrInsertFunction("__mem_trace", voidTy,
-      i64PtrTy, i32PtrTy, i32PtrTy,
-      i32Ty, i64Ty, i64Ty,
-      i32Ty, i32Ty);
+      i8PtrTy, i8PtrTy, i8PtrTy, i64Ty, i64Ty, i32Ty);
   // Prototype:
-  // __device__ void __mem_trace (
-  //   uint64_t* __dbuff, uint32_t* __inx1, uint32_t* __inx2,
-  //   uint32_t __max_n, uint64_t desc, uint64_t addr_val,
-  //   uint32_t lane_id, uint32_t slot);
+  // __device__ void __mem_trace (uint8_t* records, uint8_t* allocs,
+  //  uint8_t* commits, uint64_t desc, uint64_t addr, uint32_t slot) {
 }
 
 std::vector<Function*> getKernelFunctions(Module &M) {
@@ -157,13 +151,12 @@ struct TracePass : public ModulePass {
     TracePass() : ModulePass(ID) {}
 
     struct TraceInfoValues {
-      Value* Front;
-      Value* Back;
-      Value* Slots;
-      Value* SlotSize;
-      Value* BaseDesc;
-      Value* IndexSlot;
-      Value* LaneId;
+      Value *Allocs;
+      Value *Commits;
+      Value *Records;
+
+      Value *Desc;
+      Value *Slot;
     };
 
     std::vector<Instruction*> collectGlobalMemAccesses(Function* kernel) {
@@ -209,17 +202,14 @@ struct TracePass : public ModulePass {
 
       IRBuilder<> IRB(kernel->getEntryBlock().getFirstNonPHI());
 
-      Value *FrontPtr = IRB.CreateStructGEP(traceInfoTy, globalVar, 0);
-      Value *Front = IRB.CreateLoad(FrontPtr, "front");
+      Value *AllocsPtr = IRB.CreateStructGEP(traceInfoTy, globalVar, 0);
+      Value *Allocs = IRB.CreateLoad(AllocsPtr, "allocs");
 
-      Value *BackPtr = IRB.CreateStructGEP(traceInfoTy, globalVar, 1);
-      Value *Back = IRB.CreateLoad(BackPtr, "back");
+      Value *CommitsPtr = IRB.CreateStructGEP(traceInfoTy, globalVar, 1);
+      Value *Commits = IRB.CreateLoad(CommitsPtr, "commits");
 
-      Value *SlotsPtr = IRB.CreateStructGEP(traceInfoTy, globalVar, 2);
-      Value *Slots = IRB.CreateLoad(SlotsPtr, "slot");
-
-      Value *SlotSizePtr = IRB.CreateStructGEP(traceInfoTy, globalVar, 3);
-      Value *SlotSize = IRB.CreateLoad(SlotSizePtr, "slot_size");
+      Value *RecordsPtr = IRB.CreateStructGEP(traceInfoTy, globalVar, 2);
+      Value *Records = IRB.CreateLoad(RecordsPtr, "records");
 
       IntegerType* I32Type = IntegerType::get(M.getContext(), 32);
 
@@ -230,23 +220,16 @@ struct TracePass : public ModulePass {
           InlineAsm::AsmDialect::AD_ATT );
       Value *SMId = IRB.CreateCall(SMIdASM);
 
-      InlineAsm *LaneIdASM = InlineAsm::get(ASMFTy,
-          "mov.u32 $0, %laneid;", "=r", false,
-          InlineAsm::AsmDialect::AD_ATT );
-      Value *LaneId = IRB.CreateCall(LaneIdASM);
-
       auto SMId64 = IRB.CreateZExtOrBitCast(SMId, IRB.getInt64Ty(), "desc");
-      auto BaseDesc = IRB.CreateShl(SMId64, 32);
-      auto SlotMask  = IRB.getInt32(SLOTS_NUM - 1);
-      auto IndexSlot = IRB.CreateAnd(SMId, SlotMask);
+      auto Desc = IRB.CreateShl(SMId64, 32);
 
-      info->Front = Front;
-      info->Back = Back;
-      info->Slots = Slots;
-      info->SlotSize = SlotSize;
-      info->BaseDesc = BaseDesc;
-      info->IndexSlot = IndexSlot;
-      info->LaneId = LaneId;
+      auto Slot = IRB.CreateAnd(SMId, IRB.getInt32(SLOTS_NUM - 1));
+
+      info->Allocs = Allocs;
+      info->Commits = Commits;
+      info->Records = Records;
+      info->Desc = Desc;
+      info->Slot = Slot;
     }
 
     void instrumentKernel(Function *F, ArrayRef<Instruction*> MemAccesses,
@@ -264,13 +247,11 @@ struct TracePass : public ModulePass {
       int AtomicCounter = 0;
       int StoreCounter = 0;
 
-      auto IndexArray1 = info->Front;
-      auto IndexArray2 = info->Back;
-      auto DataBuff = info->Slots;
-      auto MaxInx = info->SlotSize;
-      auto LaneId = info->LaneId;
-      auto IndexSlot = info->IndexSlot;
-      auto Desc = info->BaseDesc;
+      auto Allocs = info->Allocs;
+      auto Commits = info->Commits;
+      auto Records = info->Records;
+      auto Slot = info->Slot;
+      auto Desc = info->Desc;
 
       IRBuilder<> IRB(F->front().getFirstNonPHI());
       // Get Buffer Segment based on SMID and Load the Pointer
@@ -305,9 +286,7 @@ struct TracePass : public ModulePass {
         // Add tracing
         LDesc = IRB.CreateOr(LDesc, (uint64_t) ValueSize);
         auto PtrToStore = IRB.CreatePtrToInt(PtrOperand,  IRB.getInt64Ty());
-        IRB.CreateCall(TraceCall, 
-            {DataBuff, IndexArray1, IndexArray2,
-            MaxInx, LDesc, PtrToStore, LaneId, IndexSlot});
+        IRB.CreateCall(TraceCall,  {Records, Allocs, Commits, LDesc, PtrToStore, Slot});
       }
     }
 
