@@ -44,9 +44,9 @@ llvm::StructType* getTraceInfoType(llvm::LLVMContext &ctx) {
   using llvm::StructType;
 
   Type *fields[] = {
-    Type::getInt32PtrTy(ctx),
-    Type::getInt32PtrTy(ctx),
-    Type::getInt64PtrTy(ctx),
+    Type::getInt8PtrTy(ctx),
+    Type::getInt8PtrTy(ctx),
+    Type::getInt8PtrTy(ctx),
     Type::getInt32Ty(ctx),
   };
 
