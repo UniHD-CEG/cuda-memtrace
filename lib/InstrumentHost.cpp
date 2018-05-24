@@ -20,10 +20,6 @@
  *
  */
 
-#define INCLUDE_LLVM_MEMTRACE_STUFF
-#include "Common.h"
-#undef INCLUDE_LLVM_MEMTRACE_STUFF
-
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Operator.h"
 
@@ -35,6 +31,9 @@
 #include "llvm/PassRegistry.h"
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/Transforms/IPO/PassManagerBuilder.h"
+
+#define INCLUDE_LLVM_MEMTRACE_STUFF
+#include "Common.h"
 
 #define DEBUG_TYPE "memtrace-host"
 
@@ -205,9 +204,8 @@ struct InstrumentHost : public ModulePass {
     }
 
     bool runOnModule(Module &M) override {
-      if (M.getTargetTriple().find("nvptx") != std::string::npos) {
-        return false;
-      }
+      bool isCUDA = M.getTargetTriple().find("nvptx") != std::string::npos;
+      if (isCUDA) return false;
 
       Function* cudaConfigureCall = M.getFunction("cudaConfigureCall");
       if (cudaConfigureCall == nullptr) {
@@ -229,13 +227,10 @@ struct InstrumentHost : public ModulePass {
 
 char InstrumentHost::ID = 0;
 
-static RegisterPass<InstrumentHost> X("memtrace-host", "inserts host-side instrumentation for mem-traces", false, false);
-
-// This enables Autoregistration of the Pass
-static void registerTracePass(const PassManagerBuilder &,legacy::PassManagerBase &PM) {
-    PM.add(new InstrumentHost);
+namespace llvm {
+  Pass *createInstrumentHostPass() {
+    return new InstrumentHost();
+  }
 }
-static RegisterStandardPasses RegisterTracePass(
-    PassManagerBuilder::EP_OptimizerLast, registerTracePass);
-static RegisterStandardPasses RegisterTracePass0(
-    PassManagerBuilder::EP_EnabledOnOptLevel0, registerTracePass);
+
+static RegisterPass<InstrumentHost> X("memtrace-host", "inserts host-side instrumentation for mem-traces", false, false);

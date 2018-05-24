@@ -1,9 +1,17 @@
 set(LLVM_NO_RTTI 1)
 
 add_llvm_loadable_module(LLVMMemtrace
-  MemtracePass.cpp
+  LinkDeviceSupport.cpp
+  InstrumentDevice.cpp
+
+  LinkHostSupport.cpp
   InstrumentHost.cpp
+
+  RegisterStandardPasses.cpp
   )
+add_dependencies(LLVMMemtrace
+  memtrace-device-utils
+  memtrace-host-utils)
 
 if (LLVM_LINK_LLVM_DYLIB)
   target_link_libraries(LLVMMemtrace PUBLIC LLVM)

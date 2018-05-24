@@ -1,21 +1,15 @@
-
-#define INCLUDE_LLVM_MEMTRACE_STUFF
-#include "Common.h"
-#undef INCLUDE_LLVM_MEMTRACE_STUFF
-
 #include "llvm/Pass.h"
 #include "llvm/IR/Module.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/IRBuilder.h"
-
-#include "llvm/PassRegistry.h"
-#include "llvm/IR/LegacyPassManager.h"
-#include "llvm/Transforms/IPO/PassManagerBuilder.h"
 #include "llvm/IR/InlineAsm.h"
 
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/SmallPtrSet.h"
+
+#define INCLUDE_LLVM_MEMTRACE_STUFF
+#include "Common.h"
 
 #define DEBUG_TYPE "memtrace-device"
 
@@ -146,9 +140,9 @@ PointerKind getPointerKind(Value* val, bool isKernel) {
 
 
 // Needs to be a ModulePass because we modify the global variables.
-struct TracePass : public ModulePass {
+struct InstrumentDevicePass : public ModulePass {
     static char ID;
-    TracePass() : ModulePass(ID) {}
+    InstrumentDevicePass() : ModulePass(ID) {}
 
     struct TraceInfoValues {
       Value *Allocs;
@@ -169,9 +163,13 @@ struct TracePass : public ModulePass {
           } else if (auto *store = dyn_cast<StoreInst>(&inst)) {
             kind = getPointerKind(store->getPointerOperand(), true);
           } else if (auto *call = dyn_cast<CallInst>(&inst)) {
-            StringRef calleeName = call->getCalledFunction()->getName();
+            Function* callee = call->getCalledFunction();
+            if (callee == nullptr) continue;
+            StringRef calleeName = callee->getName();
             if (calleeName.startswith("llvm.nvvm.atomic")) {
               kind = getPointerKind(call->getArgOperand(0), true);
+            } else if ( calleeName == "__mem_trace") {
+              report_fatal_error("already instrumented!");
             } else if ( !calleeName.startswith("llvm.") ) {
               report_fatal_error("non-intrinsic call in kernel!");
             }
@@ -291,10 +289,8 @@ struct TracePass : public ModulePass {
     }
 
     bool runOnModule(Module &M) override {
-        // no CUDA module 
-        if(M.getTargetTriple().find("nvptx") == std::string::npos) {
-            return false;
-        }
+      bool isCUDA = M.getTargetTriple().find("nvptx") != std::string::npos;
+      if (!isCUDA) return false;
 
         for (auto *kernel : getKernelFunctions(M)) {
           auto accesses = collectGlobalMemAccesses(kernel);
@@ -312,15 +308,12 @@ struct TracePass : public ModulePass {
     }
 
 };
-char TracePass::ID = 0;
+char InstrumentDevicePass::ID = 0;
 
-static RegisterPass<TracePass> X("memtrace-device", "includes static and dynamic load/store counting", false, false);
-
-// This enables Autoregistration of the Pass
-static void registerTracePass(const PassManagerBuilder &,legacy::PassManagerBase &PM) {
-    PM.add(new TracePass);
+namespace llvm {
+  Pass *createInstrumentDevicePass() {
+    return new InstrumentDevicePass();
+  }
 }
-static RegisterStandardPasses RegisterTracePass(
-    PassManagerBuilder::EP_OptimizerLast, registerTracePass);
-static RegisterStandardPasses RegisterTracePass0(
-    PassManagerBuilder::EP_EnabledOnOptLevel0, registerTracePass);
+
+static RegisterPass<InstrumentDevicePass> X("memtrace-device", "includes static and dynamic load/store counting", false, false);

@@ -23,10 +23,9 @@ typedef struct record_t {
 // Buffers: SLOTS_NUM * SLOTS_SIZE * RECORD_SIZE
 // Absolute minimum is the warp size, all threads in a warp must collectively
 // wait or be able to write a record
-//#define SLOTS_SIZE (256 * 1024)
-#define SLOTS_SIZE (64)
+#define SLOTS_SIZE (256 * 1024)
 // Number of slots must be power of two!
-#define SLOTS_NUM (4)
+#define SLOTS_NUM (8)
 
 #define CACHELINE (64)
 
