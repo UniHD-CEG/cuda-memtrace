@@ -74,9 +74,7 @@ GlobalVariable* defineDeviceGlobal(Module &M, Type* T, const Twine &name) {
   auto *globalVar = new GlobalVariable(M, T, false,
       GlobalValue::ExternalLinkage, zero, name, nullptr,
       GlobalVariable::NotThreadLocal, 1, true);
-  globalVar->setAlignment(4);
-  //uint64_t Size = M.getDataLayout().getTypeStoreSize(T);
-  //globalVar->setAlignment(Size);
+  //globalVar->setAlignment(4);
   return globalVar;
 }
 
@@ -202,20 +200,20 @@ struct InstrumentDevicePass : public ModulePass {
 
       //errs() << "patching kernel '" << kernel->getName() << "'\n";
 
+      IRBuilder<> IRB(kernel->getEntryBlock().getFirstNonPHI());
+
       Module &M = *kernel->getParent();
       std::string symbolName = getSymbolNameForKernel(kernel->getName());
       auto* globalVar = defineDeviceGlobal(M, traceInfoTy, symbolName);
       assert(globalVar != nullptr);
 
-      IRBuilder<> IRB(kernel->getEntryBlock().getFirstNonPHI());
-
-      Value *AllocsPtr = IRB.CreateStructGEP(traceInfoTy, globalVar, 0);
+      Value *AllocsPtr = IRB.CreateStructGEP(nullptr, globalVar, 0);
       Value *Allocs = IRB.CreateLoad(AllocsPtr, "allocs");
 
-      Value *CommitsPtr = IRB.CreateStructGEP(traceInfoTy, globalVar, 1);
+      Value *CommitsPtr = IRB.CreateStructGEP(nullptr, globalVar, 1);
       Value *Commits = IRB.CreateLoad(CommitsPtr, "commits");
 
-      Value *RecordsPtr = IRB.CreateStructGEP(traceInfoTy, globalVar, 2);
+      Value *RecordsPtr = IRB.CreateStructGEP(nullptr, globalVar, 2);
       Value *Records = IRB.CreateLoad(RecordsPtr, "records");
 
       IntegerType* I32Type = IntegerType::get(M.getContext(), 32);

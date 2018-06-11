@@ -68,19 +68,20 @@ struct InstrumentHost : public ModulePass {
     Constant *TraceStart = nullptr;
     Constant *TraceStop = nullptr;
 
-    GlobalVariable* newGlobal(Module &M, Type* T, const Twine &name) {
-      Constant *zero = Constant::getNullValue(T);
-      auto *globalVar = new GlobalVariable(M, traceInfoTy, false,
-          GlobalValue::InternalLinkage, zero, name);
-      assert(globalVar != nullptr);
-      return globalVar;
-    }
-
-    /** Create call to register a device variable and tie it to a host variabe.
-     * Requires a handle to the device code image containing the device variable.
+    /** Create a global Variable and tell the CUDA runtime to link it with a global
+     * variable in device memory with the same name.
      */
-    void registerCudaGlobal(GlobalVariable* global) {
-      Module &M = *global->getParent();
+    GlobalVariable* getOrCreateCudaGlobalVar(Module &M, Type* T, const Twine &name) {
+      // first see if the variable already exists
+      GlobalVariable *Global = M.getGlobalVariable(name.getSingleStringRef());
+      if (Global) {
+        return Global;
+      }
+
+      // Variable does not exist, so we create one and register it
+      Constant *zero = Constant::getNullValue(T);
+      Global = new GlobalVariable(M, T, false, GlobalValue::InternalLinkage, zero, name);
+      assert(Global != nullptr);
 
       /* Get declaration of cuda initialization function created bei clang
        */
@@ -108,14 +109,14 @@ struct InstrumentHost : public ModulePass {
       auto *Fn = M.getOrInsertFunction("__cudaRegisterVar", FnTy);
       assert(Fn != nullptr);
 
-      auto *GlobalNameLiteral = IRB.CreateGlobalString(global->getName());
+      auto *GlobalNameLiteral = IRB.CreateGlobalString(Global->getName());
       auto *GlobalNameGEP = IRB.CreateConstInBoundsGEP1_32(nullptr, GlobalNameLiteral, 0);
       auto *GlobalName = IRB.CreateBitCast(GlobalNameGEP, charPtrTy);
 
-      auto *GlobalValueGEP = IRB.CreateConstInBoundsGEP1_32(nullptr, global, 0);
-      auto *GlobalAddress = IRB.CreateBitCast(GlobalValueGEP, charPtrTy);
+      //auto *GlobalValueGEP = IRB.CreateConstInBoundsGEP1_32(nullptr, global, 0);
+      auto *GlobalAddress = IRB.CreateBitCast(Global, charPtrTy);
 
-      uint64_t GlobalSize = M.getDataLayout().getTypeStoreSize(global->getType());
+      uint64_t GlobalSize = M.getDataLayout().getTypeStoreSize(Global->getType());
 
       Value *CubinHandle = &*CudaSetup->arg_begin();
 
@@ -124,6 +125,8 @@ struct InstrumentHost : public ModulePass {
 
       IRB.CreateCall(Fn, {CubinHandle, GlobalAddress, GlobalName, GlobalName,
           IRB.getInt32(0), IRB.getInt32(GlobalSize), IRB.getInt32(0), IRB.getInt32(0)});
+
+      return Global;
     }
 
     /** Sets up pointers to (and inserts prototypes of) the utility functions
@@ -138,10 +141,9 @@ struct InstrumentHost : public ModulePass {
      * void __trace_start(cudaStream_t stream, const char *kernel_name);
      * void __trace_stop(cudaStream_t stream);
      */
-    void findOrInsertFunctions(Module &M) {
+    void findOrInsertRuntimeFunctions(Module &M) {
       LLVMContext &ctx = M.getContext();
       Type* cuStreamTy = Type::getInt8PtrTy(ctx);
-      //Type* cuErrTy = Type::getInt32Ty(ctx);
       Type* voidPtrTy = Type::getInt8PtrTy(ctx);
       Type* stringTy = Type::getInt8PtrTy(ctx);
       Type* voidTy = Type::getVoidTy(ctx);
@@ -260,15 +262,14 @@ struct InstrumentHost : public ModulePass {
       // try adding in global symbol + cuda registration
       Module &M = *configureCall->getParent()->getParent()->getParent();
 
-      auto *globalVar = newGlobal(M, traceInfoTy, kernelSymbolName);
-      registerCudaGlobal(globalVar);
+      auto *globalVar = getOrCreateCudaGlobalVar(M, traceInfoTy, kernelSymbolName);
       auto *globalVarPtr = IRB.CreateBitCast(globalVar, IRB.getInt8PtrTy());
 
       IRB.CreateCall(TraceTouch, {streamPtr});
       IRB.CreateCall(TraceStart, {streamPtr, kernelNameVal});
 
       const DataLayout &DL = configureCall->getParent()->getParent()->getParent()->getDataLayout();
-      size_t bufSize = DL.getTypeStoreSize(traceInfoTy);
+      size_t bufSize = DL.getTypeStoreSize(globalVar->getType());
 
       Value* infoBuf = IRB.CreateAlloca(i8Ty, IRB.getInt32(bufSize));
       IRB.CreateCall(TraceFillInfo, {infoBuf, streamPtr});
@@ -280,7 +281,6 @@ struct InstrumentHost : public ModulePass {
       // 1. stop trace consumer
       IRB.SetInsertPoint(launch->getNextNode());
       IRB.CreateCall(TraceStop, {streamPtr});
-
     }
 
     bool runOnModule(Module &M) override {
@@ -293,15 +293,13 @@ struct InstrumentHost : public ModulePass {
       }
 
       traceInfoTy = getTraceInfoType(M.getContext());
-      findOrInsertFunctions(M);
+      findOrInsertRuntimeFunctions(M);
 
       for (auto* user : cudaConfigureCall->users()) {
         if (auto *call = dyn_cast<CallInst>(user)) {
           patchKernelCall(call);
         }
       }
-
-
       //errs() << *M.getFunction("__cuda_register_globals") << "\n";
 
       return true;
