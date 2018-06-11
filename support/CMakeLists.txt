@@ -3,12 +3,16 @@
 ###############################################################################
 ## HOST SUPPORT
 
+set(MEMTRACE_CUDA_FLAGS "-O2" CACHE STRING "clang-cuda flags used to compile memtrace runtime")
+message(STATUS "Using MEMTRACE_CUDA_FLAGS:" ${MEMTRACE_CUDA_FLAGS})
+
 # compile to bitcode
 add_custom_command(OUTPUT "${LLVM_BINARY_DIR}/lib/libmemtrace-host.bc"
   COMMAND bin/clang++
-    -std=c++11 -O2
+    -std=c++11
     --cuda-host-only
     -c -emit-llvm
+    ${MEMTRACE_CUDA_FLAGS}
     -o lib/libmemtrace-host.bc
     "${CMAKE_CURRENT_SOURCE_DIR}/host-support.cu"
   
@@ -40,10 +44,10 @@ add_custom_target(memtrace-host-utils ALL DEPENDS
 # compile to bitcode
 add_custom_command(OUTPUT "${LLVM_BINARY_DIR}/lib/libmemtrace-device.bc"
   COMMAND bin/clang++
-    -std=c++11 -O2
     --cuda-device-only
-    --cuda-gpu-arch=sm_30
     -c -emit-llvm
+    --cuda-gpu-arch=sm_30
+    ${MEMTRACE_CUDA_FLAGS}
     -o lib/libmemtrace-device.bc
     "${CMAKE_CURRENT_SOURCE_DIR}/device-support.cu"
   

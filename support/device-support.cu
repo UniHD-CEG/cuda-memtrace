@@ -11,8 +11,8 @@ __device__ void __mem_trace (uint8_t* records, uint8_t* allocs, uint8_t* commits
 
     uint32_t lane_id;
     asm volatile ("mov.u32 %0, %%laneid;" : "=r"(lane_id));
-
-    uint32_t active   = __ballot(1); // get number of active threads 
+    // why does this cause weird problems when compiled into bitcode module?!
+    uint32_t active = __ballot(1);
     uint32_t rlane_id = __popc(active << (32 - lane_id));
     uint32_t n_active = __popc(active);
     uint32_t lowest   = __ffs(active)-1;

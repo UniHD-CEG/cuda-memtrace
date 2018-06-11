@@ -29,7 +29,6 @@ endif ()
 set(MEKONG_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR})
 set(MEKONG_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR})
 
-
 # Add appropriate flags for GCC
 if (CMAKE_COMPILER_IS_GNUCXX)
   # FIXME: Turn off exceptions, RTTI:

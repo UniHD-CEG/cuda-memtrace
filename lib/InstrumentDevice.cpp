@@ -33,6 +33,9 @@ enum TraceType {
  * Various helper functions
  */
 
+// Prototype
+// __device__ void __mem_trace (uint8_t* records, uint8_t* allocs,
+//  uint8_t* commits, uint64_t desc, uint64_t addr, uint32_t slot) {
 Constant *getOrInsertTraceDecl(Module &M) {
   LLVMContext &ctx = M.getContext();
 
@@ -43,9 +46,6 @@ Constant *getOrInsertTraceDecl(Module &M) {
 
   return M.getOrInsertFunction("__mem_trace", voidTy,
       i8PtrTy, i8PtrTy, i8PtrTy, i64Ty, i64Ty, i32Ty);
-  // Prototype:
-  // __device__ void __mem_trace (uint8_t* records, uint8_t* allocs,
-  //  uint8_t* commits, uint64_t desc, uint64_t addr, uint32_t slot) {
 }
 
 std::vector<Function*> getKernelFunctions(Module &M) {
@@ -67,6 +67,17 @@ std::vector<Function*> getKernelFunctions(Module &M) {
         }
     }
     return Kernels;
+}
+
+GlobalVariable* defineDeviceGlobal(Module &M, Type* T, const Twine &name) {
+  Constant *zero = Constant::getNullValue(T);
+  auto *globalVar = new GlobalVariable(M, T, false,
+      GlobalValue::ExternalLinkage, zero, name, nullptr,
+      GlobalVariable::NotThreadLocal, 1, true);
+  globalVar->setAlignment(4);
+  //uint64_t Size = M.getDataLayout().getTypeStoreSize(T);
+  //globalVar->setAlignment(Size);
+  return globalVar;
 }
 
 /******************************************************************************
@@ -192,11 +203,9 @@ struct InstrumentDevicePass : public ModulePass {
       //errs() << "patching kernel '" << kernel->getName() << "'\n";
 
       Module &M = *kernel->getParent();
-      auto *globalVar = new GlobalVariable(M, traceInfoTy, false,
-          GlobalValue::ExternalLinkage, nullptr,
-          getSymbolNameForKernel(kernel->getName()), nullptr);
+      std::string symbolName = getSymbolNameForKernel(kernel->getName());
+      auto* globalVar = defineDeviceGlobal(M, traceInfoTy, symbolName);
       assert(globalVar != nullptr);
-      globalVar->setAlignment(4);
 
       IRBuilder<> IRB(kernel->getEntryBlock().getFirstNonPHI());
 

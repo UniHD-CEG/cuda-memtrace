@@ -15,6 +15,9 @@
   }\
 } while(0)\
 
+extern "C"
+__constant__ traceinfo_t globalVar;
+
 extern "C" {
 void __trace_touch(cudaStream_t stream);
 void __trace_start(cudaStream_t stream, const char *kernel_name);
@@ -66,11 +69,13 @@ int main(int argc, char** argv) {
 
   traceinfo_t info;
   __trace_fill_info(&info, NULL);
+  __trace_copy_to_symbol(NULL, "globalVar", &info);
 
   uint8_t *allocs = info.allocs;
   uint8_t *commits = info.commits;
   uint8_t *records = info.records;
   test_kernel<<<blocks, threads>>>(records, allocs, commits, rounds, modulo);
+  cudaMemcpyToSymbol(globalVar, &info, sizeof(traceinfo_t), cudaMemcpyHostToDevice);
   cudaChecked(cudaDeviceSynchronize());
 
   printf("stopping trace\n");

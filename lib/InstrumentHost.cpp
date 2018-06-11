@@ -44,17 +44,87 @@ struct KernelCallInfo {
     
 };
 
+void createPrintf(IRBuilder<> &IRB, const Twine &fmt, ArrayRef<Value*> values) {
+  Module &M = *IRB.GetInsertBlock()->getModule();
+  Function* Printf = M.getFunction("printf");
+  auto *FormatGlobal = IRB.CreateGlobalString(fmt.getSingleStringRef());
+  Type* charPtrTy = IRB.getInt8Ty()->getPointerTo();
+  Value* Format = IRB.CreateBitCast(FormatGlobal, charPtrTy);
+  SmallVector<Value*, 4> args;
+  args.append({Format});
+  args.append(values.begin(), values.end());
+  IRB.CreateCall(Printf, args);
+}
+
 struct InstrumentHost : public ModulePass {
     static char ID;
     InstrumentHost() : ModulePass(ID) {}
 
-    Type* TraceInfoType = nullptr;
+    Type* traceInfoTy = nullptr;
 
     Constant *TraceFillInfo = nullptr;
     Constant *TraceCopyToSymbol = nullptr;
     Constant *TraceTouch = nullptr;
     Constant *TraceStart = nullptr;
     Constant *TraceStop = nullptr;
+
+    GlobalVariable* newGlobal(Module &M, Type* T, const Twine &name) {
+      Constant *zero = Constant::getNullValue(T);
+      auto *globalVar = new GlobalVariable(M, traceInfoTy, false,
+          GlobalValue::InternalLinkage, zero, name);
+      assert(globalVar != nullptr);
+      return globalVar;
+    }
+
+    /** Create call to register a device variable and tie it to a host variabe.
+     * Requires a handle to the device code image containing the device variable.
+     */
+    void registerCudaGlobal(GlobalVariable* global) {
+      Module &M = *global->getParent();
+
+      /* Get declaration of cuda initialization function created bei clang
+       */
+      Function* CudaSetup = M.getFunction("__cuda_register_globals");
+      assert(CudaSetup != nullptr);
+      IRBuilder<> IRB(M.getContext());
+
+      IRB.SetInsertPoint(CudaSetup->getEntryBlock().getFirstNonPHIOrDbg());
+      //IRB.SetInsertPoint(&CudaSetup->back().back());
+
+      /** Get declaration of __cudaRegisterVar.
+       * Protype:
+       *  extern void CUDARTAPI __cudaRegisterVar(void **fatCubinHandle,
+       *   char  *hostVar, char  *deviceAddress, const char  *deviceName,
+       *   int ext, int size, int constant, int global);
+       */
+      Type* voidTy = IRB.getVoidTy();
+      // no void*/* in llvm, we use i8*/* instead
+      Type* voidPtrPtrTy = IRB.getInt8Ty()->getPointerTo()->getPointerTo();
+      Type* charPtrTy = IRB.getInt8Ty()->getPointerTo();
+      Type* intTy = IRB.getInt32Ty();
+      auto *FnTy = FunctionType::get(voidTy, {voidPtrPtrTy,
+          charPtrTy, charPtrTy, charPtrTy,
+          intTy, intTy, intTy, intTy}, false);
+      auto *Fn = M.getOrInsertFunction("__cudaRegisterVar", FnTy);
+      assert(Fn != nullptr);
+
+      auto *GlobalNameLiteral = IRB.CreateGlobalString(global->getName());
+      auto *GlobalNameGEP = IRB.CreateConstInBoundsGEP1_32(nullptr, GlobalNameLiteral, 0);
+      auto *GlobalName = IRB.CreateBitCast(GlobalNameGEP, charPtrTy);
+
+      auto *GlobalValueGEP = IRB.CreateConstInBoundsGEP1_32(nullptr, global, 0);
+      auto *GlobalAddress = IRB.CreateBitCast(GlobalValueGEP, charPtrTy);
+
+      uint64_t GlobalSize = M.getDataLayout().getTypeStoreSize(global->getType());
+
+      Value *CubinHandle = &*CudaSetup->arg_begin();
+
+      createPrintf(IRB, "registering... symbol name: %s, symbol address: %p, name address: %p\n",
+          {GlobalName, GlobalAddress, GlobalName});
+
+      IRB.CreateCall(Fn, {CubinHandle, GlobalAddress, GlobalName, GlobalName,
+          IRB.getInt32(0), IRB.getInt32(GlobalSize), IRB.getInt32(0), IRB.getInt32(0)});
+    }
 
     /** Sets up pointers to (and inserts prototypes of) the utility functions
      * from the host-support library.
@@ -182,18 +252,28 @@ struct InstrumentHost : public ModulePass {
       Type* i8Ty = IRB.getInt8Ty();
 
       Value* kernelNameVal = IRB.CreateGlobalStringPtr(kernelName);
-      Value* kernelInfoSymbolVal = IRB.CreateGlobalStringPtr(kernelSymbolName);
+
+      //Value* kernelInfoSymbolVal = IRB.CreateGlobalStringPtr(kernelSymbolName);
+
       Value* streamPtr = IRB.CreatePointerCast(stream, IRB.getInt8PtrTy());
+
+      // try adding in global symbol + cuda registration
+      Module &M = *configureCall->getParent()->getParent()->getParent();
+
+      auto *globalVar = newGlobal(M, traceInfoTy, kernelSymbolName);
+      registerCudaGlobal(globalVar);
+      auto *globalVarPtr = IRB.CreateBitCast(globalVar, IRB.getInt8PtrTy());
 
       IRB.CreateCall(TraceTouch, {streamPtr});
       IRB.CreateCall(TraceStart, {streamPtr, kernelNameVal});
 
       const DataLayout &DL = configureCall->getParent()->getParent()->getParent()->getDataLayout();
-      size_t bufSize = DL.getTypeStoreSize(TraceInfoType);
+      size_t bufSize = DL.getTypeStoreSize(traceInfoTy);
 
       Value* infoBuf = IRB.CreateAlloca(i8Ty, IRB.getInt32(bufSize));
       IRB.CreateCall(TraceFillInfo, {infoBuf, streamPtr});
-      IRB.CreateCall(TraceCopyToSymbol, {streamPtr, kernelInfoSymbolVal, infoBuf});
+      //IRB.CreateCall(TraceCopyToSymbol, {streamPtr, kernelInfoSymbolVal, infoBuf});
+      IRB.CreateCall(TraceCopyToSymbol, {streamPtr, globalVarPtr, infoBuf});
 
 
       // insert finishing steps after kernel launch was issued
@@ -212,7 +292,7 @@ struct InstrumentHost : public ModulePass {
         return false;
       }
 
-      TraceInfoType = getTraceInfoType(M.getContext());
+      traceInfoTy = getTraceInfoType(M.getContext());
       findOrInsertFunctions(M);
 
       for (auto* user : cudaConfigureCall->users()) {
@@ -220,6 +300,9 @@ struct InstrumentHost : public ModulePass {
           patchKernelCall(call);
         }
       }
+
+
+      //errs() << *M.getFunction("__cuda_register_globals") << "\n";
 
       return true;
     }
