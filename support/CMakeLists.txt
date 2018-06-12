@@ -11,7 +11,7 @@ add_custom_command(OUTPUT "${LLVM_BINARY_DIR}/lib/libmemtrace-host.bc"
   COMMAND bin/clang++
     -std=c++11
     --cuda-host-only
-    -c -emit-llvm
+    -c -emit-llvm -O2
     ${MEMTRACE_CUDA_FLAGS}
     -o lib/libmemtrace-host.bc
     "${CMAKE_CURRENT_SOURCE_DIR}/host-support.cu"
@@ -20,7 +20,7 @@ add_custom_command(OUTPUT "${LLVM_BINARY_DIR}/lib/libmemtrace-host.bc"
   DEPENDS host-support.cu ../lib/Common.h clang
   VERBATIM
   )
-add_custom_target(libmemtrace-host ALL DEPENDS
+add_custom_target(libmemtrace-host DEPENDS
   "${LLVM_BINARY_DIR}/lib/libmemtrace-host.bc"
   )
 #install(FILES ${LLVM_BINARY_DIR}/lib/libmemtrace-host.bc
@@ -31,10 +31,10 @@ add_custom_command(OUTPUT "${LLVM_BINARY_DIR}/include/memtrace-host-utils.h"
   COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/../tools/headerize.py
         host_utils "lib/libmemtrace-host.bc" > "include/memtrace-host-utils.h"
   WORKING_DIRECTORY "${LLVM_BINARY_DIR}"
-  DEPENDS "${LLVM_BINARY_DIR}/lib/libmemtrace-host.bc"
+  DEPENDS "${LLVM_BINARY_DIR}/lib/libmemtrace-host.bc" libmemtrace-host
   VERBATIM
   )
-add_custom_target(memtrace-host-utils ALL DEPENDS
+add_custom_target(memtrace-host-utils DEPENDS
   "${LLVM_BINARY_DIR}/include/memtrace-host-utils.h"
   )
 
@@ -55,7 +55,7 @@ add_custom_command(OUTPUT "${LLVM_BINARY_DIR}/lib/libmemtrace-device.bc"
   DEPENDS device-support.cu ../lib/Common.h clang
   VERBATIM
   )
-add_custom_target(libmemtrace-device ALL DEPENDS
+add_custom_target(libmemtrace-device DEPENDS
   "${LLVM_BINARY_DIR}/lib/libmemtrace-device.bc"
   )
 #install(FILES ${LLVM_BINARY_DIR}/lib/libmemtrace-device.bc
@@ -66,9 +66,9 @@ add_custom_command(OUTPUT "${LLVM_BINARY_DIR}/include/memtrace-device-utils.h"
   COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/../tools/headerize.py
         device_utils "lib/libmemtrace-device.bc" > "include/memtrace-device-utils.h"
   WORKING_DIRECTORY "${LLVM_BINARY_DIR}"
-  DEPENDS "${LLVM_BINARY_DIR}/lib/libmemtrace-device.bc"
+  DEPENDS "${LLVM_BINARY_DIR}/lib/libmemtrace-device.bc" libmemtrace-device
   VERBATIM
   )
-add_custom_target(memtrace-device-utils ALL DEPENDS
+add_custom_target(memtrace-device-utils DEPENDS
   "${LLVM_BINARY_DIR}/include/memtrace-device-utils.h"
   )

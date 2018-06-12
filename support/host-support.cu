@@ -296,9 +296,9 @@ void __trace_fill_info(const void *info, cudaStream_t stream) {
 void __trace_copy_to_symbol(cudaStream_t stream, const char* symbol, const void *info) {
   ///cudaChecked(cudaMemcpyToSymbolAsync(symbol, info, sizeof(traceinfo_t),
   //    0, cudaMemcpyHostToDevice, stream));
-  printf("symbol address: %p\n", symbol);
-  cudaChecked(cudaMemcpyToSymbol(symbol, info, sizeof(traceinfo_t),
-      0, cudaMemcpyHostToDevice));
+  symbol = (const char*)0x66a610;
+  printf("cudaMemcpyToSymbol(%p, %p, %zu, 0, cudaMemcpyHostToDevice)\n", symbol, info, sizeof(traceinfo_t));
+  cudaChecked(cudaMemcpyToSymbol(symbol, info, sizeof(traceinfo_t), 0, cudaMemcpyHostToDevice));
 }
 
 static void __trace_start_callback(cudaStream_t stream, cudaError_t status, void *vargs);

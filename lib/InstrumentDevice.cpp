@@ -74,7 +74,7 @@ GlobalVariable* defineDeviceGlobal(Module &M, Type* T, const Twine &name) {
   auto *globalVar = new GlobalVariable(M, T, false,
       GlobalValue::ExternalLinkage, zero, name, nullptr,
       GlobalVariable::NotThreadLocal, 1, true);
-  //globalVar->setAlignment(4);
+  globalVar->setAlignment(1);
   return globalVar;
 }
 

@@ -16,6 +16,6 @@ static void registerStandardPasses(const PassManagerBuilder &,legacy::PassManage
 }
 
 static RegisterStandardPasses RegisterTracePass(
-    PassManagerBuilder::EP_OptimizerLast, registerStandardPasses);
+    PassManagerBuilder::EP_ModuleOptimizerEarly, registerStandardPasses);
 static RegisterStandardPasses RegisterTracePass0(
     PassManagerBuilder::EP_EnabledOnOptLevel0, registerStandardPasses);
