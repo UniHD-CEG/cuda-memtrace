@@ -25,7 +25,6 @@ else ()
     LLVMTransformUtils
     LLVMAnalysis
     LLVMipo
-    LLVMisl
     LLVMMC
     LLVMPasses
     LLVMLinker

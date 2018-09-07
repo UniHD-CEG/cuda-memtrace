@@ -180,7 +180,10 @@ struct InstrumentDevicePass : public ModulePass {
             } else if ( calleeName == "__mem_trace") {
               report_fatal_error("already instrumented!");
             } else if ( !calleeName.startswith("llvm.") ) {
-              report_fatal_error("non-intrinsic call in kernel!");
+              kernel->getParent()->dump();
+              std::string error = "call to non-intrinsic: ";
+              error.append(calleeName);
+              report_fatal_error(error.c_str());
             }
           } else {
             continue;
