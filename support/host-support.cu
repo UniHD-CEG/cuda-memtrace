@@ -8,6 +8,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <libgen.h>
 
 #define always_assert(cond) do {\
   if (!(cond)) {\
@@ -25,13 +26,40 @@
   }\
 } while(0)
 
+
+static const char* getexename() {
+  static char* cmdline = NULL;
+
+  if (cmdline != NULL) {
+    return cmdline;
+  }
+
+  FILE *f = fopen("/proc/self/cmdline", "r");
+  if (!f) {
+    return NULL;
+  }
+  size_t n;
+  getdelim(&cmdline, &n, 0, f);
+  fclose(f);
+  cmdline = basename(cmdline);
+  return cmdline;
+}
+
 /** Allows to specify base name for traces. The first occurence of
  * "?" is replaced with an ID unique to each stream.
  * Default pattern: "./trace-?.bin"
  */
 static std::string traceName(std::string id) {
+  static const char* exename = getexename(); // initialize once
   const char* pattern_env = getenv("MEMTRACE_PATTERN");
-  std::string pattern = pattern_env ? pattern_env : "./trace-?.bin";
+  std::string pattern;
+  if (pattern_env) {
+    pattern = pattern_env;
+  } else if (exename) {
+    pattern = "./" + std::string(exename) + "-?.trc";
+  } else {
+    pattern = "./trace-?.trc";
+  }
 
   size_t pos = pattern.find("?");
   if (pos != std::string::npos) {
