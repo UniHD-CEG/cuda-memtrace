@@ -81,6 +81,7 @@ struct InstrumentHost : public ModulePass {
       // Variable does not exist, so we create one and register it
       Constant *zero = Constant::getNullValue(T);
       Global = new GlobalVariable(M, T, false, GlobalValue::InternalLinkage, zero, name);
+      Global->setAlignment(8);
       assert(Global != nullptr);
 
       /* Get declaration of cuda initialization function created bei clang
@@ -146,21 +147,21 @@ struct InstrumentHost : public ModulePass {
      */
     void findOrInsertRuntimeFunctions(Module &M) {
       LLVMContext &ctx = M.getContext();
-      Type* cuStreamTy = Type::getInt8PtrTy(ctx);
+      Type* cuStreamPtrTy = Type::getInt8PtrTy(ctx);
       Type* voidPtrTy = Type::getInt8PtrTy(ctx);
       Type* stringTy = Type::getInt8PtrTy(ctx);
       Type* voidTy = Type::getVoidTy(ctx);
 
       TraceFillInfo = M.getOrInsertFunction("__trace_fill_info",
-          voidTy, voidPtrTy, cuStreamTy);
+          voidTy, voidPtrTy, cuStreamPtrTy);
       TraceCopyToSymbol = M.getOrInsertFunction("__trace_copy_to_symbol",
-          voidTy, cuStreamTy, stringTy, voidPtrTy);
+          voidTy, cuStreamPtrTy, voidPtrTy, voidPtrTy);
       TraceTouch = M.getOrInsertFunction("__trace_touch",
-          voidTy, cuStreamTy);
+          voidTy, cuStreamPtrTy);
       TraceStart = M.getOrInsertFunction("__trace_start",
-          voidTy, cuStreamTy, stringTy);
+          voidTy, cuStreamPtrTy, stringTy);
       TraceStop = M.getOrInsertFunction("__trace_stop",
-          voidTy, cuStreamTy);
+          voidTy, cuStreamPtrTy);
     }
 
     /** Find the kernel launch or wrapper function belonging to a
@@ -244,7 +245,6 @@ struct InstrumentHost : public ModulePass {
       StringRef kernelName = getKernelNameOfLaunch(launch);
       assert(configureCall->getNumArgOperands() == 6);
       auto *stream = configureCall->getArgOperand(5);
-      std::string kernelSymbolName = getSymbolNameForKernel(kernelName);
 
       // insert preparational steps directly after cudaConfigureCall
       // 0. touch consumer to create new one if necessary
@@ -262,6 +262,7 @@ struct InstrumentHost : public ModulePass {
       Module &M = *configureCall->getParent()->getParent()->getParent();
 
       Type* GlobalVarType = traceInfoTy;
+      std::string kernelSymbolName = getSymbolNameForKernel(kernelName);
       GlobalVariable *globalVar = getOrCreateCudaGlobalVar(M, GlobalVarType, kernelSymbolName);
 
       auto *globalVarPtr = IRB.CreateBitCast(globalVar, IRB.getInt8PtrTy());
@@ -301,7 +302,6 @@ struct InstrumentHost : public ModulePass {
           patchKernelCall(call);
         }
       }
-      //errs() << *M.getFunction("__cuda_register_globals") << "\n";
 
       return true;
     }

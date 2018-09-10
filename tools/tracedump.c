@@ -20,8 +20,15 @@
  *
  * Record:
  * first byte: 0xFF
- * next 24 bytes: memory dump of 3 x uint64_t
+ * next 24 bytes: memory dump of 3 x uint64_t:
+ * <32bits reserverd> <4 bits: type of access> <28 bits: size>
+ * <64bits address>
+ * <64bits cta id>
  */
+
+const char* ACC_TYPE_NAMES[] = {
+  "LD", "ST", "AT", "??"
+};
 
 #define die(...) do {\
   printf(__VA_ARGS__);\
@@ -110,8 +117,9 @@ int main(int argc, char** argv) {
     input = stdin;
   } else if (argc == 2) {
     input = fopen(argv[1], "r");
-    if (input == NULL)
+    if (input == NULL) {
       die("Unable to open file '%s', exiting\n", argv[1]);
+    }
   } else {
     usage("tracedump");
     exit(1);
@@ -122,22 +130,29 @@ int main(int argc, char** argv) {
   uint64_t num_records = 0;
 
   header_t header;
-  if (read_header(input, &header) != 0)
+  if (read_header(input, &header) != 0) {
     die("unable to read header\n");
+  }
   while (1) {
     kernel_t kernel;
     record_t record;
     record.addr = 0xfffff;
-    if (read_kernel(input, &kernel) != 0)
+    if (read_kernel(input, &kernel) != 0) {
       break;
+    }
     printf("Kernel name: %s\n", kernel.name);
     while (1) {
-      if (read_record(input, &record) != 0)
+      if (read_record(input, &record) != 0) {
         break;
+      }
       num_records += 1;
+
       if (!quiet) {
-        printf("  Record: 0x%" PRIx64 " 0x%" PRIx64 " 0x%" PRIx64 "\n",
-            record.desc, record.addr, record.cta);
+        //printf("  Record: 0x%" PRIx64 " 0x%" PRIx64 " 0x%" PRIx64 "\n",
+        //    record.desc, record.addr, record.cta);
+        printf("  type: %s, bytes: %" PRId32 ", addr: 0x%" PRIx64 ", cta: (%d, %d, %d), sm: %d\n",
+            ACC_TYPE_NAMES[GET_ACCESS_TYPE(record)], GET_ACCESS_SIZE(record), GET_ACCESS_ADDR(record),
+            GET_ACCESS_CTAIDX(record), GET_ACCESS_CTAIDY(record), GET_ACCESS_CTAIDZ(record), GET_ACCESS_SM(record));
       }
     }
   }

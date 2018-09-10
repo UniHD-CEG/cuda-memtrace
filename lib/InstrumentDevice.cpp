@@ -22,12 +22,12 @@
 
 using namespace llvm;
 
-enum TraceType {
-    Load    = 0 << 28,
-    Store   = 1 << 28,
-    Atomic  = 3 << 28,
-    Unknown = 4 << 28,
-};
+// enum TraceType {
+//     Load    = 0 << 28,
+//     Store   = 1 << 28,
+//     Atomic  = 3 << 28,
+//     Unknown = 4 << 28,
+// };
 
 /******************************************************************************
  * Various helper functions
@@ -75,6 +75,7 @@ GlobalVariable* defineDeviceGlobal(Module &M, Type* T, const Twine &name) {
       GlobalValue::ExternalLinkage, zero, name, nullptr,
       GlobalVariable::NotThreadLocal, 1, true);
   globalVar->setAlignment(1);
+  globalVar->setDSOLocal(true);
   return globalVar;
 }
 
@@ -180,7 +181,6 @@ struct InstrumentDevicePass : public ModulePass {
             } else if ( calleeName == "__mem_trace") {
               report_fatal_error("already instrumented!");
             } else if ( !calleeName.startswith("llvm.") ) {
-              kernel->getParent()->dump();
               std::string error = "call to non-intrinsic: ";
               error.append(calleeName);
               report_fatal_error(error.c_str());
@@ -201,12 +201,11 @@ struct InstrumentDevicePass : public ModulePass {
       LLVMContext &ctx = kernel->getParent()->getContext();
       Type *traceInfoTy = getTraceInfoType(ctx);
 
-      //errs() << "patching kernel '" << kernel->getName() << "'\n";
-
       IRBuilder<> IRB(kernel->getEntryBlock().getFirstNonPHI());
 
       Module &M = *kernel->getParent();
       std::string symbolName = getSymbolNameForKernel(kernel->getName());
+      //errs() << "creating device symbol " << symbolName << "\n";
       auto* globalVar = defineDeviceGlobal(M, traceInfoTy, symbolName);
       assert(globalVar != nullptr);
 
@@ -271,20 +270,20 @@ struct InstrumentDevicePass : public ModulePass {
 
         if (auto li = dyn_cast<LoadInst>(inst)) {
           PtrOperand = li->getPointerOperand();
-          LDesc = IRB.CreateOr(Desc, (uint64_t)TraceType::Load);
+          LDesc = IRB.CreateOr(Desc, ((uint64_t)ACCESS_LOAD << ACCESS_TYPE_SHIFT));
           LoadCounter++;
         } else if (auto si = dyn_cast<StoreInst>(inst)) {
           PtrOperand = si->getPointerOperand();
-          LDesc = IRB.CreateOr(Desc, (uint64_t)TraceType::Store );
+          LDesc = IRB.CreateOr(Desc, ((uint64_t)ACCESS_STORE << ACCESS_TYPE_SHIFT));
           StoreCounter++;
         } else if (auto *FuncCall = dyn_cast<CallInst>(inst)) {
           assert(FuncCall->getCalledFunction()->getName()
               .startswith("llvm.nvvm.atomic"));
           PtrOperand = FuncCall->getArgOperand(0);
-          LDesc      = IRB.CreateOr(Desc, (uint64_t)TraceType::Atomic);
+          LDesc      = IRB.CreateOr(Desc, ((uint64_t)ACCESS_ATOMIC << ACCESS_TYPE_SHIFT));
           AtomicCounter++;
         } else {
-          report_fatal_error("this should be unreachable");
+          report_fatal_error("invalid access type encountered, this should not have happened");
         }
 
         PointerType *PtrTy = dyn_cast<PointerType>(PtrOperand->getType());
@@ -310,6 +309,8 @@ struct InstrumentDevicePass : public ModulePass {
 
           instrumentKernel(kernel, accesses, &info);
         }
+
+        //M.dump();
 
         return true;
     }

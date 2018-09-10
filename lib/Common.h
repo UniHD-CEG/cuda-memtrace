@@ -11,10 +11,35 @@ typedef struct {
 } traceinfo_t;
 
 typedef struct record_t {
-  int64_t desc;
-  int64_t addr;
-  int64_t cta;
+  uint64_t desc;
+  uint64_t addr;
+  uint64_t cta;
 } record_t;
+
+#define ACCESS_TYPE_SHIFT (28)
+enum ACCESS_TYPE {
+  ACCESS_LOAD = 0,
+  ACCESS_STORE = 1,
+  ACCESS_ATOMIC = 2,
+  ACCESS_UNKNOWN = 3,
+};
+
+#define GET_ACCESS_SM(R) (int)((R.desc >> 28) & 0xf)
+#define GET_ACCESS_TYPE(R) (int)((R.desc >> 28) & 0xf)
+#define GET_ACCESS_SIZE(R) (int)(record.desc & (0x0fffffff))
+#define GET_ACCESS_ADDR(R) (uint64_t)(record.addr)
+#define GET_ACCESS_CTAIDX(R) (int)((record.cta >> 32) & 0xffffffff)
+#define GET_ACCESS_CTAIDY(R) (int)((record.cta >> 16) & 0x0000ffff)
+#define GET_ACCESS_CTAIDZ(R) (int)((record.cta) & 0x0000ffff)
+
+// Field "desc"
+#define MAKE_ACCESS_SM(id)     ((((uint64_t)id) &   0xffffffff) << 32)
+#define MAKE_ACCESS_TYPE(type) ((((uint64_t)type) & 0x0000000f) << 28)
+#define MAKE_ACCESS_SIZE(size)  (((uint64_t)size) & 0x0fffffff)
+
+// Field "desc"
+
+
 
 // Size of a record in bytes, contents of a record:
 // 32 bit meta info, 32bit size, 64 bit address, 64 bit cta id
