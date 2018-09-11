@@ -43,9 +43,14 @@ int main(int argc, char** argv) {
     die("%s", trace_last_error);
   }
 
+  int64_t accesses = -1;
   while (trace_next(trace) == 0) {
     if (trace->new_kernel) {
+      if (accesses > -1) {
+        printf("  Total number of accesses: %" PRId64 "\n", accesses);
+      }
       printf("Kernel name: %s\n", trace->kernel_name);
+      accesses = 0;
     } else {
       trace_record_t *r = &trace->record;
       if (r->count == 1) {
@@ -57,11 +62,15 @@ int main(int argc, char** argv) {
           ACC_TYPE_NAMES[r->type], r->addr, r->count, r->size,
           r->ctaid.x, r->ctaid.y, r->ctaid.z, r->smid);
       }
+      accesses += r->count;
     }
   }
   if (!trace_eof(trace)) {
     printf("position: %zu\n", ftell(trace->file));
     die("%s", trace_last_error);
+  }
+  if (accesses > -1) {
+    printf("  Total number of accesses: %" PRId64 "\n", accesses);
   }
 
   trace_close(trace);

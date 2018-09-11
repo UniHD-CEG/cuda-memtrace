@@ -1,4 +1,5 @@
 #include "../lib/Common.h"
+#include "../tools/cutrace_io.h"
 
 #include <atomic>
 #include <string>
@@ -129,9 +130,7 @@ public:
       abort();
     }
 
-    fputc(0x19, output);
-    fputs("CUDATRACE", output);
-
+    trace_write_header(output, 3);
   }
 
   virtual ~TraceConsumer() {
@@ -153,10 +152,8 @@ public:
     // just for testing purposes
     memset(RecordsHost, 0, SLOTS_NUM * SLOTS_SIZE * RECORD_SIZE);
 
-    uint16_t nameSize = name.size();
-    fputc(0x00, output);
-    fwrite(&nameSize, 2, 1, output);
-    fwrite(name.c_str(), nameSize, 1, output);
+    recordAcc.count = 0; // count == 0 -> uninitialized
+    trace_write_kernel(output, name.c_str());
 
     workerThread = std::thread(consume, this);
 
@@ -187,7 +184,7 @@ protected:
 
   // clear up a slot if it is full
   static void consumeSlot(uint8_t *allocPtr, uint8_t *commitPtr, uint8_t *recordsPtr,
-      FILE* out, bool onlyFull) {
+      FILE* out, bool kernelActive, trace_record_t *acc) {
     // allocs/commits is written by threads on the GPU, so we need it volatile
     volatile uint32_t *vcommit = (uint32_t*)commitPtr;
     volatile uint32_t *valloc = (uint32_t*)allocPtr;
@@ -195,15 +192,34 @@ protected:
     
     // if kernel is still active we only want to read full slots
     uint32_t numRecords = *vcommit;
-    if (onlyFull && !(numRecords > SLOTS_SIZE - 32)) {
+    if (kernelActive && !(numRecords > SLOTS_SIZE - 32)) {
       return;
     }
 
-    // we know everything stopped, so we avoid using the volatile reference
-    // in the end condition
+    trace_record_t newrec;
+    // we know writing from the gpu stopped, so we avoid using the volatile
+    // reference in the end condition
     for (int32_t i = 0; i < numRecords; ++i) {
-      fputc(0xff, out);
-      fwrite(&recordsPtr[i * RECORD_SIZE], RECORD_SIZE, 1, out);
+
+      __trace_unpack((uint64_t*)&recordsPtr[i * RECORD_SIZE], &newrec);
+
+      // if this is the first record, intialize it
+      if (acc->count == 0) {
+        *acc = newrec;
+        acc->count = 1;
+      } else { // otherwise see if we can increment or have to flush
+        uint64_t currAddress = acc->addr + (acc->size * acc->count);
+        if (newrec.addr == currAddress && newrec.type == acc->type &&
+            newrec.size == acc->size && newrec.ctaid.x == acc->ctaid.x &&
+            newrec.ctaid.y == acc->ctaid.y && newrec.ctaid.z == acc->ctaid.z &&
+            newrec.smid == acc->smid) {
+          acc->count += 1;
+        } else {
+          trace_write_record(out, acc);
+          *acc = newrec;
+          acc->count = 1;
+        }
+      }
     }
 
     *vcommit = 0;
@@ -228,7 +244,7 @@ protected:
         uint32_t commits_offset = slot * CACHELINE;
         uint32_t records_offset = slot * SLOTS_SIZE * RECORD_SIZE;
         consumeSlot(&allocs[allocs_offset], &commits[commits_offset],
-            &records[records_offset], sink, true);
+            &records[records_offset], sink, true, &obj->recordAcc);
       }
     }
 
@@ -239,8 +255,12 @@ protected:
       uint32_t commits_offset = slot * CACHELINE;
       uint32_t records_offset = slot * SLOTS_SIZE * RECORD_SIZE;
         consumeSlot(&allocs[allocs_offset], &commits[commits_offset],
-            &records[records_offset], sink, false);
+            &records[records_offset], sink, false, &obj->recordAcc);
     }
+
+    // flush accumulator and reset to uninitialized
+    trace_write_record(sink, &obj->recordAcc);
+    obj->recordAcc.count = 0;
 
     obj->doesRun = false;
     return;
@@ -250,6 +270,7 @@ protected:
 
   std::atomic<bool> shouldRun;
   std::atomic<bool> doesRun;
+  trace_record_t recordAcc; // recordAccumulator for compression
 
   FILE *output;
   std::thread       workerThread;

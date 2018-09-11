@@ -223,20 +223,16 @@ int trace_write_header(FILE *f, int version) {
 int trace_write_kernel(FILE *f, const char* name) {
   uint8_t bufmarker = 0x00;
   uint16_t bufsize = strlen(name);
-  fprintf(stderr, "kernel name length: %d\n", strlen(name));
-  fprintf(stderr, "bufsize: %d\n", bufsize);
   if (fwrite(&bufmarker, 1, 1, f) < 1) {
     trace_last_error = "write error";
     return 1;
   }
   if (fwrite(&bufsize, 2, 1, f) < 1) {
     trace_last_error = "write error";
-    fprintf(stderr, "error writing kernel name length\n");
     return 1;
   }
   if (fwrite(name, bufsize, 1, f) < 1) {
     trace_last_error = "write error";
-    fprintf(stderr, "error writing kernel name\n");
     return 1;
   }
   return 0;
