@@ -1,6 +1,7 @@
 set(LLVM_NO_RTTI 1)
 
 add_llvm_loadable_module(LLVMMemtrace
+  MarkAllDeviceForInline.cpp
   LinkDeviceSupport.cpp
   InstrumentDevice.cpp
 
@@ -39,3 +40,6 @@ else ()
     clangTooling
     )
 endif()
+
+install(FILES ${MEMTRACE_SOURCE_DIR}/lib/cutrace_io.h
+  DESTINATION include)

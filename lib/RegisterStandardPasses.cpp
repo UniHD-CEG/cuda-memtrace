@@ -9,6 +9,7 @@ using namespace llvm;
 
 // This enables Autoregistration of the Pass
 static void registerStandardPasses(const PassManagerBuilder &,legacy::PassManagerBase &PM) {
+    PM.add(createMarkAllDeviceForInlinePass());
     PM.add(createAlwaysInlinerLegacyPass());
     PM.add(createLinkDeviceSupportPass());
     PM.add(createInstrumentDevicePass());

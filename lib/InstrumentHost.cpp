@@ -68,6 +68,8 @@ struct InstrumentHost : public ModulePass {
     Constant *TraceStart = nullptr;
     Constant *TraceStop = nullptr;
 
+    std::vector<std::string> registeredSymbols;
+
     /** Create a global Variable and tell the CUDA runtime to link it with a global
      * variable in device memory with the same name.
      */
@@ -80,7 +82,7 @@ struct InstrumentHost : public ModulePass {
 
       // Variable does not exist, so we create one and register it
       Constant *zero = Constant::getNullValue(T);
-      Global = new GlobalVariable(M, T, false, GlobalValue::InternalLinkage, zero, name);
+      Global = new GlobalVariable(M, T, false, GlobalValue::LinkOnceAnyLinkage, zero, name);
       Global->setAlignment(8);
       assert(Global != nullptr);
 
@@ -124,6 +126,7 @@ struct InstrumentHost : public ModulePass {
 
       //createPrintf(IRB, "registering... symbol name: %s, symbol address: %p, name address: %p\n",
       //    {GlobalName, GlobalAddress, GlobalName});
+      //errs() << "registering device symbol " << name << "\n";
 
       IRB.CreateCall(Fn, {CubinHandle, GlobalAddress, GlobalName, GlobalName,
           IRB.getInt32(0), IRB.getInt32(GlobalSize), IRB.getInt32(0), IRB.getInt32(0)});
@@ -288,6 +291,8 @@ struct InstrumentHost : public ModulePass {
     bool runOnModule(Module &M) override {
       bool isCUDA = M.getTargetTriple().find("nvptx") != std::string::npos;
       if (isCUDA) return false;
+
+      registeredSymbols.clear();
 
       Function* cudaConfigureCall = M.getFunction("cudaConfigureCall");
       if (cudaConfigureCall == nullptr) {
