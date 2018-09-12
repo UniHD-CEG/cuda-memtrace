@@ -12,7 +12,8 @@ add_llvm_loadable_module(LLVMMemtrace
   )
 add_dependencies(LLVMMemtrace
   memtrace-device-utils
-  memtrace-host-utils
+  #memtrace-host-utils
+  libmemtrace-host-o
   )
 
 if (LLVM_LINK_LLVM_DYLIB)

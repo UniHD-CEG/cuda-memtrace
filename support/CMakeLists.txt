@@ -7,36 +7,48 @@ set(MEMTRACE_CUDA_FLAGS "-O2" CACHE STRING "clang-cuda flags used to compile mem
 message(STATUS "Using MEMTRACE_CUDA_FLAGS:" ${MEMTRACE_CUDA_FLAGS})
 
 # compile to bitcode
-add_custom_command(OUTPUT "${LLVM_BINARY_DIR}/lib/libmemtrace-host.bc"
+# add_custom_command(OUTPUT "${LLVM_BINARY_DIR}/lib/libmemtrace-host.bc"
+#   COMMAND bin/clang++
+#     -std=c++11 --cuda-host-only -c -emit-llvm -O2
+#     ${MEMTRACE_CUDA_FLAGS}
+#     -o lib/libmemtrace-host.bc
+#     "${CMAKE_CURRENT_SOURCE_DIR}/host-support.cu"
+#   
+#   WORKING_DIRECTORY "${LLVM_BINARY_DIR}"
+#   DEPENDS host-support.cu ../lib/Common.h clang
+#   VERBATIM
+#   )
+# add_custom_target(libmemtrace-host DEPENDS
+#   "${LLVM_BINARY_DIR}/lib/libmemtrace-host.bc"
+#   )
+# # pack into header
+# add_custom_command(OUTPUT "${LLVM_BINARY_DIR}/include/memtrace-host-utils.h"
+#   COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/../tools/headerize.py
+#         host_utils "lib/libmemtrace-host.bc" > "include/memtrace-host-utils.h"
+#   WORKING_DIRECTORY "${LLVM_BINARY_DIR}"
+#   DEPENDS "${LLVM_BINARY_DIR}/lib/libmemtrace-host.bc" libmemtrace-host
+#   VERBATIM
+#   )
+# add_custom_target(memtrace-host-utils DEPENDS
+#   "${LLVM_BINARY_DIR}/include/memtrace-host-utils.h"
+#   )
+
+add_custom_command(OUTPUT "${LLVM_BINARY_DIR}/lib/libmemtrace-host.o"
   COMMAND bin/clang++
-    -std=c++11
-    --cuda-host-only
-    -c -emit-llvm -O2
+    -std=c++11 --cuda-host-only -c -O2
     ${MEMTRACE_CUDA_FLAGS}
-    -o lib/libmemtrace-host.bc
+    -o lib/libmemtrace-host.o
     "${CMAKE_CURRENT_SOURCE_DIR}/host-support.cu"
   
   WORKING_DIRECTORY "${LLVM_BINARY_DIR}"
   DEPENDS host-support.cu ../lib/Common.h clang
   VERBATIM
   )
-add_custom_target(libmemtrace-host DEPENDS
-  "${LLVM_BINARY_DIR}/lib/libmemtrace-host.bc"
+add_custom_target(libmemtrace-host-o
+  DEPENDS "${LLVM_BINARY_DIR}/lib/libmemtrace-host.o"
   )
-#install(FILES ${LLVM_BINARY_DIR}/lib/libmemtrace-host.bc
-#  DESTINATION lib)
-
-# pack into header
-add_custom_command(OUTPUT "${LLVM_BINARY_DIR}/include/memtrace-host-utils.h"
-  COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/../tools/headerize.py
-        host_utils "lib/libmemtrace-host.bc" > "include/memtrace-host-utils.h"
-  WORKING_DIRECTORY "${LLVM_BINARY_DIR}"
-  DEPENDS "${LLVM_BINARY_DIR}/lib/libmemtrace-host.bc" libmemtrace-host
-  VERBATIM
-  )
-add_custom_target(memtrace-host-utils DEPENDS
-  "${LLVM_BINARY_DIR}/include/memtrace-host-utils.h"
-  )
+install(FILES ${LLVM_BINARY_DIR}/lib/libmemtrace-host.o
+  DESTINATION lib)
 
 ###############################################################################
 ## DEVICE SUPPORT

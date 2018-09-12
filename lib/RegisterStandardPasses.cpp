@@ -14,7 +14,7 @@ static void registerStandardPasses(const PassManagerBuilder &,legacy::PassManage
     PM.add(createLinkDeviceSupportPass());
     PM.add(createInstrumentDevicePass());
 
-    PM.add(createLinkHostSupportPass());
+    //PM.add(createLinkHostSupportPass());
     PM.add(createInstrumentHostPass());
 }
 
