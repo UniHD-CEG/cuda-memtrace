@@ -171,48 +171,52 @@ struct InstrumentHost : public ModulePass {
      * cudaConfigureCall. Must handle inlined and non-inlined cases.
      */
     CallInst* searchKernelLaunchFor(Instruction *inst) {
-      while (inst != nullptr) {
-        // on conditional branches, assume everything went okay
-        if (auto *br = dyn_cast<BranchInst>(inst)) {
+      SmallVector<Instruction*, 8> stack;
+      stack.push_back(inst);
+      while (stack.size() > 0) {
+        Instruction *curr = stack.back();
+        stack.pop_back();
+        if (curr == nullptr) {
+          continue;
+        }
+
+        if (auto *br = dyn_cast<BranchInst>(curr)) {
           if (br->isUnconditional()) {
-            inst = inst->getNextNode();
-            continue;
+            stack.push_back(br->getSuccessor(0)->getFirstNonPHI());
           } else {
-            auto *BB = br->getSuccessor(0);
-            StringRef name = BB->getName();
-            if (name.startswith("kcall.configok") || name.startswith("setup.next")) {
-              inst = BB->getFirstNonPHI();
-              continue;
+            // if this is a branch, try to find a 'config went ok' branch and
+            // follow that one, otherwise just skip the branch.
+            int numSuccessors = br->getNumSuccessors();
+            for (int i = 0; i < numSuccessors; ++i) {
+              auto *BB = br->getSuccessor(i);
+              StringRef name = BB->getName();
+              if (name.startswith("kcall.configok") || name.startswith("setup.next")) {
+                stack.push_back(BB->getFirstNonPHI());
+                break;
+              }
             }
-            BB = br->getSuccessor(1);
-            name = BB->getName();
-            if (name.startswith("kcall.configok") || name.startswith("setup.next")) {
-              inst = BB->getFirstNonPHI();
-              continue;
-            }
-            // unrecognized branch
-            return nullptr;
           }
-        }
-
-        StringRef callee = "";
-        if (auto *call = dyn_cast<CallInst>(inst)) {
-          callee = call->getCalledFunction()->getName();
+        } else if (auto *call = dyn_cast<CallInst>(curr)) {
+          // if this is a call, it gets interesting, use a heuristic to figure out
+          // whether this is a cudaConfigure Call
+          auto callee = call->getCalledValue();
+          if (callee == nullptr) {
+            report_fatal_error("non-function callee (e.g. function pointer)");
+          }
+          auto calleeName = callee->getName();
           // blacklist helper functions
-          if (callee == "cudaSetupArgument" || callee == "cudaConfigureCall"
-              || callee.startswith("llvm.lifetime")) {
-            inst = inst->getNextNode();
-            continue;
+          if (calleeName == "cudaSetupArgument" || calleeName == "cudaConfigureCall"
+              || calleeName.startswith("llvm.lifetime")) {
+            stack.push_back(curr->getNextNode());
+          } else {
+            return dyn_cast<CallInst>(curr);
           }
-          // this either cudaLaunch or a wrapper, break and return
-          break;
+        } else {
+          // uninteresting, get next
+          stack.push_back(curr->getNextNode());
         }
-
-        // uninteresting, get next
-        inst = inst->getNextNode();
-        continue;
       }
-      return dyn_cast_or_null<CallInst>(inst);
+      return nullptr;
     }
 
     /** Given a "kernel launch" differentiate whether it is a cudaLaunch or
