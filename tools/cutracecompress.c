@@ -1,4 +1,4 @@
-#include "cutrace_io.h"
+#include "../lib/cutrace_io.h"
 
 #ifndef __STDC_FORMAT_MACROS
 #define __STDC_FORMAT_MACROS

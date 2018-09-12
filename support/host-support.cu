@@ -1,5 +1,5 @@
 #include "../lib/Common.h"
-#include "../tools/cutrace_io.h"
+#include "../lib/cutrace_io.h"
 
 #include <atomic>
 #include <string>
