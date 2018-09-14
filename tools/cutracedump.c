@@ -37,6 +37,8 @@ int main(int argc, char** argv) {
     exit(1);
   }
 
+  int quiet = getenv("QUIET") != NULL;
+
   trace_t *trace = trace_open(input);
 
   if (trace == NULL) {
@@ -53,6 +55,10 @@ int main(int argc, char** argv) {
       accesses = 0;
     } else {
       trace_record_t *r = &trace->record;
+      accesses += r->count;
+      if (quiet) {
+        continue;
+      }
       if (r->count == 1) {
         printf("  type: %s, addr: 0x%" PRIx64 ", size: %" PRIu32 ", cta: (%d, %d, %d), sm: %d\n",
           ACC_TYPE_NAMES[r->type], r->addr, r->size,
@@ -62,7 +68,6 @@ int main(int argc, char** argv) {
           ACC_TYPE_NAMES[r->type], r->addr, r->count, r->size,
           r->ctaid.x, r->ctaid.y, r->ctaid.z, r->smid);
       }
-      accesses += r->count;
     }
   }
   if (!trace_eof(trace)) {
