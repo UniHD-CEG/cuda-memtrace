@@ -66,7 +66,7 @@ typedef struct trace_t {
   trace_record_t record;
 } trace_t;
 
-const char *trace_last_error;
+const char *trace_last_error = NULL;
 
 /******************************************************************************
  * reader
@@ -145,6 +145,7 @@ int trace_next(trace_t *t) {
     }
     t->kernel_name[nameLen] = '\0';
     t->new_kernel = 1;
+    trace_last_error = NULL;
     return 0;
   }
 
@@ -158,6 +159,7 @@ int trace_next(trace_t *t) {
     }
     __trace_unpack(buf, &t->record);
     t->record.count = 1;
+    trace_last_error = NULL;
     return 0;
   }
 
@@ -179,6 +181,7 @@ int trace_next(trace_t *t) {
     }
 
     t->record.count = countbuf;
+    trace_last_error = NULL;
     return 0;
   }
 
@@ -217,6 +220,7 @@ int trace_write_header(FILE *f, int version) {
     trace_last_error = "invalid version";
     return 1;
   }
+  trace_last_error = NULL;
   return 0;
 }
 
@@ -235,6 +239,7 @@ int trace_write_kernel(FILE *f, const char* name) {
     trace_last_error = "write error";
     return 1;
   }
+  trace_last_error = NULL;
   return 0;
 }
 
@@ -258,6 +263,7 @@ int trace_write_record(FILE *f, const trace_record_t *record) {
       return 1;
     }
   }
+  trace_last_error = NULL;
   return 0;
 }
 

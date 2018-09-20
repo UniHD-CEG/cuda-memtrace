@@ -152,7 +152,6 @@ public:
     // just for testing purposes
     memset(RecordsHost, 0, SLOTS_NUM * SLOTS_SIZE * RECORD_SIZE);
 
-    recordAcc.count = 0; // count == 0 -> uninitialized
     trace_write_kernel(output, name.c_str());
 
     workerThread = std::thread(consume, this);
@@ -231,6 +230,7 @@ protected:
   // payload function of queue consumer
   static void consume(TraceConsumer *obj) {
     obj->doesRun = true;
+    obj->recordAcc.count = 0; // count == 0 -> uninitialized
 
     uint8_t *allocs = obj->AllocsHost;
     uint8_t *commits = obj->CommitsHost;
@@ -258,9 +258,11 @@ protected:
             &records[records_offset], sink, false, &obj->recordAcc);
     }
 
-    // flush accumulator and reset to uninitialized
-    trace_write_record(sink, &obj->recordAcc);
-    obj->recordAcc.count = 0;
+    // flush accumulator and reset to uninitialized (if at all initialized)
+    if (obj->recordAcc.count > 0) {
+      trace_write_record(sink, &obj->recordAcc);
+      obj->recordAcc.count = 0;
+    }
 
     obj->doesRun = false;
     return;

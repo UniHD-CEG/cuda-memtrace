@@ -70,9 +70,9 @@ int main(int argc, char** argv) {
       }
     }
   }
-  if (!trace_eof(trace)) {
+  if (trace_last_error != NULL) {
     printf("position: %zu\n", ftell(trace->file));
-    die("%s", trace_last_error);
+    die("%s\n", trace_last_error);
   }
   if (accesses > -1) {
     printf("  Total number of accesses: %" PRId64 "\n", accesses);
