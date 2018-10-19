@@ -123,8 +123,9 @@ void __trace_pack(const trace_record_t *record, uint64_t buf[3]) {
 // returns 0 on success
 int trace_next(trace_t *t) {
   int ch = fgetc(t->file);
+  // end of file, this is not an error
   if (ch == EOF) {
-    trace_last_error = "end of file";
+    trace_last_error = NULL;
     return 1;
   }
 
