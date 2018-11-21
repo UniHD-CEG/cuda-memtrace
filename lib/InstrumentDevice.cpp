@@ -8,6 +8,8 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/SmallPtrSet.h"
 
+#include <set>
+
 #define INCLUDE_LLVM_MEMTRACE_STUFF
 #include "Common.h"
 
@@ -49,12 +51,11 @@ Constant *getOrInsertTraceDecl(Module &M) {
 }
 
 std::vector<Function*> getKernelFunctions(Module &M) {
-    std::vector<Function*> Kernels;
+    std::set<Function*> Kernels;
     NamedMDNode * kernel_md = M.getNamedMetadata("nvvm.annotations");
     if (kernel_md) {
         // MDNodes in NamedMDNode
         for (const MDNode *node : kernel_md->operands()) {
-            //node->dump();
             // MDOperands in MDNode
             for (const MDOperand &op : node->operands()) {
                 Metadata * md = op.get();
@@ -62,11 +63,11 @@ std::vector<Function*> getKernelFunctions(Module &M) {
                 if (!v) continue;
                 Function *f = dyn_cast<Function>(v->getValue());
                 if (!f) continue;
-                Kernels.push_back(f);
+                Kernels.insert(f);
             }
         }
     }
-    return Kernels;
+    return std::vector<Function*>(Kernels.begin(), Kernels.end());
 }
 
 GlobalVariable* defineDeviceGlobal(Module &M, Type* T, const Twine &name) {
@@ -301,18 +302,18 @@ struct InstrumentDevicePass : public ModulePass {
       bool isCUDA = M.getTargetTriple().find("nvptx") != std::string::npos;
       if (!isCUDA) return false;
 
-        for (auto *kernel : getKernelFunctions(M)) {
-          auto accesses = collectGlobalMemAccesses(kernel);
+      for (auto *kernel : getKernelFunctions(M)) {
+        auto accesses = collectGlobalMemAccesses(kernel);
 
-          TraceInfoValues info;
-          setupTraceInfo(kernel, &info);
+        TraceInfoValues info;
+        setupTraceInfo(kernel, &info);
 
-          instrumentKernel(kernel, accesses, &info);
-        }
+        instrumentKernel(kernel, accesses, &info);
+      }
 
-        //M.dump();
+      //M.dump();
 
-        return true;
+      return true;
     }
 
     void getAnalysisUsage(AnalysisUsage &AU) const override {
