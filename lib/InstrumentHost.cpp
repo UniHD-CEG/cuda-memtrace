@@ -222,9 +222,12 @@ struct InstrumentHost : public ModulePass {
             report_fatal_error("non-function callee (e.g. function pointer)");
           }
           auto calleeName = callee->getName();
-          // blacklist helper functions
-          if (calleeName == "cudaSetupArgument" || calleeName == "cudaConfigureCall"
+          // kernel calls are void type, skip any non-void
+          if (!call->getType()->isVoidTy()) {
+            stack.push_back(curr->getNextNode());
+          } else if (calleeName == "cudaSetupArgument" || calleeName == "cudaConfigureCall"
               || calleeName.startswith("llvm.lifetime")) {
+          // blacklist helper functions
             stack.push_back(curr->getNextNode());
           } else {
             return dyn_cast<CallInst>(curr);
@@ -242,10 +245,14 @@ struct InstrumentHost : public ModulePass {
      */
     StringRef getKernelNameOfLaunch(CallInst *launch) {
       if (launch == nullptr) {
-        return "anonymous";
+        return "";
       }
 
-      StringRef calledFunctionName = launch->getCalledFunction()->getName();
+      Function* calledFunction = launch->getCalledFunction();
+      if (calledFunction == nullptr || !calledFunction->hasName()) {
+        return "";
+      }
+      StringRef calledFunctionName = calledFunction->getName();
 
       // for kernel launch, return name of first operand
       if (calledFunctionName == "cudaLaunch") {
@@ -253,7 +260,11 @@ struct InstrumentHost : public ModulePass {
         while (auto *cast = dyn_cast<BitCastOperator>(op)) {
           op = cast->getOperand(0);
         }
-        return op->getName();
+        if (op->hasName()) {
+          return op->getName();
+        } else {
+          return "";
+        }
       }
 
       // otherwise return name of called function itself
@@ -268,6 +279,9 @@ struct InstrumentHost : public ModulePass {
       assert(launch != nullptr && "did not find kernel launch");
 
       StringRef kernelName = getKernelNameOfLaunch(launch);
+      if (kernelName == "") {
+        report_fatal_error("unable to determine kernel name");
+      }
       assert(configureCall->getNumArgOperands() == 6);
       auto *stream = configureCall->getArgOperand(5);
 

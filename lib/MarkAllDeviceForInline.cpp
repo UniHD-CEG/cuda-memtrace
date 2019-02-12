@@ -16,6 +16,8 @@ struct MarkAllDeviceForInlinePass : public ModulePass {
 
     for (Function &F : M) {
       if (F.isIntrinsic()) continue;
+      F.removeFnAttr(Attribute::AttrKind::OptimizeNone);
+      F.removeFnAttr(Attribute::AttrKind::NoInline);
       F.addFnAttr(Attribute::AttrKind::AlwaysInline);
     }
 
