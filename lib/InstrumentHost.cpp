@@ -33,6 +33,8 @@
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/Transforms/IPO/PassManagerBuilder.h"
 
+#include "LocateKCalls.h"
+
 #define INCLUDE_LLVM_MEMTRACE_STUFF
 #include "Common.h"
 
@@ -338,6 +340,8 @@ struct InstrumentHost : public ModulePass {
         createAndRegisterTraceVars(CudaSetup, traceInfoTy);
       }
 
+      SmallVector<KCall, 4> launches = getAnalysis<LocateKCallsPass>().getLaunches();
+
       // add instrumentation for all kernels called in this module
       Function* cudaConfigureCall = M.getFunction("cudaConfigureCall");
       if (cudaConfigureCall == nullptr) {
@@ -354,6 +358,11 @@ struct InstrumentHost : public ModulePass {
 
       return true;
     }
+
+    void getAnalysisUsage(AnalysisUsage &Info) const override {
+      Info.addRequired<LocateKCallsPass>();
+    }
+
 };
 
 char InstrumentHost::ID = 0;

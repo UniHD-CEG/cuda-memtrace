@@ -4,6 +4,7 @@ add_llvm_loadable_module(LLVMMemtrace
   MarkAllDeviceForInline.cpp
   LinkDeviceSupport.cpp
   InstrumentDevice.cpp
+  LocateKCalls.cpp
 
   LinkHostSupport.cpp
   InstrumentHost.cpp
