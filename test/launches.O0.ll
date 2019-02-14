@@ -1,7 +1,9 @@
+; RUN: opt -load LLVMMemtrace.so -memtrace-locate-kcalls -analyze < %s | FileCheck %s
 ; ModuleID = 'launches-host-x86_64-unknown-linux-gnu.bc'
 source_filename = "launches.cu"
 target datalayout = "e-m:e-i64:64-f80:128-n8:16:32:64-S128"
 target triple = "x86_64-unknown-linux-gnu"
+
 
 %struct.dim3 = type { i32, i32, i32 }
 %struct.CUstream_st = type opaque
@@ -211,6 +213,10 @@ kcall.configok34:                                 ; preds = %kcall.end26
   %add38 = add nsw i32 %call36, %call37
   call void @_Z2k1Pfi(float* %call35, i32 %add38)
   br label %kcall.end39
+
+; CHECK-LABEL: name:   _Z2k1Pfi
+; CHECK:       config:   %call32 = call i32 @cudaConfigureCall
+; CHECK:       launch:   call void @_Z2k1Pfi
 
 kcall.end39:                                      ; preds = %kcall.configok34, %kcall.end26
   ret void
