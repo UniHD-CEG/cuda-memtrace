@@ -187,103 +187,11 @@ struct InstrumentHost : public ModulePass {
           voidTy, cuStreamPtrTy);
     }
 
-    /** Find the kernel launch or wrapper function belonging to a
-     * cudaConfigureCall. Must handle inlined and non-inlined cases.
-     */
-    CallInst* searchKernelLaunchFor(Instruction *inst) {
-      SmallVector<Instruction*, 8> stack;
-      stack.push_back(inst);
-      while (stack.size() > 0) {
-        Instruction *curr = stack.back();
-        stack.pop_back();
-        if (curr == nullptr) {
-          continue;
-        }
-
-        if (auto *br = dyn_cast<BranchInst>(curr)) {
-          if (br->isUnconditional()) {
-            stack.push_back(br->getSuccessor(0)->getFirstNonPHI());
-          } else {
-            // if this is a branch, try to find a 'config went ok' branch and
-            // follow that one, otherwise just skip the branch.
-            int numSuccessors = br->getNumSuccessors();
-            for (int i = 0; i < numSuccessors; ++i) {
-              auto *BB = br->getSuccessor(i);
-              StringRef name = BB->getName();
-              if (name.startswith("kcall.configok") || name.startswith("setup.next")) {
-                stack.push_back(BB->getFirstNonPHI());
-                break;
-              }
-            }
-          }
-        } else if (auto *call = dyn_cast<CallInst>(curr)) {
-          // if this is a call, it gets interesting, use a heuristic to figure out
-          // whether this is a cudaConfigure Call
-          auto callee = call->getCalledValue();
-          if (callee == nullptr) {
-            report_fatal_error("non-function callee (e.g. function pointer)");
-          }
-          auto calleeName = callee->getName();
-          // kernel calls are void type, skip any non-void
-          if (!call->getType()->isVoidTy()) {
-            stack.push_back(curr->getNextNode());
-          } else if (calleeName == "cudaSetupArgument" || calleeName == "cudaConfigureCall"
-              || calleeName.startswith("llvm.lifetime")) {
-          // blacklist helper functions
-            stack.push_back(curr->getNextNode());
-          } else {
-            return dyn_cast<CallInst>(curr);
-          }
-        } else {
-          // uninteresting, get next
-          stack.push_back(curr->getNextNode());
-        }
-      }
-      return nullptr;
-    }
-
-    /** Given a "kernel launch" differentiate whether it is a cudaLaunch or
-     * wrapper function call and return the appropriate name.
-     */
-    StringRef getKernelNameOfLaunch(CallInst *launch) {
-      if (launch == nullptr) {
-        return "";
-      }
-
-      Function* calledFunction = launch->getCalledFunction();
-      if (calledFunction == nullptr || !calledFunction->hasName()) {
-        return "";
-      }
-      StringRef calledFunctionName = calledFunction->getName();
-
-      // for kernel launch, return name of first operand
-      if (calledFunctionName == "cudaLaunch") {
-        auto *op = launch->getArgOperand(0);
-        while (auto *cast = dyn_cast<BitCastOperator>(op)) {
-          op = cast->getOperand(0);
-        }
-        if (op->hasName()) {
-          return op->getName();
-        } else {
-          return "";
-        }
-      }
-
-      // otherwise return name of called function itself
-      return calledFunctionName;
-    }
-
     /** Updates kernel calls to set up tracing infrastructure on host and device
      * before starting the kernel and tearing everything down afterwards.
      */
-    void patchKernelCall(CallInst *configureCall) {
-      auto *launch = searchKernelLaunchFor(configureCall);
-      assert(launch != nullptr && "did not find kernel launch");
-
-      StringRef kernelName = getKernelNameOfLaunch(launch);
-      if (kernelName == "") {
-        report_fatal_error("unable to determine kernel name");
-      }
+    void patchKernelCall(CallInst *configureCall, Instruction* launch,
+        const StringRef kernelName) {
       assert(configureCall->getNumArgOperands() == 6);
       auto *stream = configureCall->getArgOperand(5);
 
@@ -340,20 +248,10 @@ struct InstrumentHost : public ModulePass {
         createAndRegisterTraceVars(CudaSetup, traceInfoTy);
       }
 
-      SmallVector<KCall, 4> launches = getAnalysis<LocateKCallsPass>().getLaunches();
-
-      // add instrumentation for all kernels called in this module
-      Function* cudaConfigureCall = M.getFunction("cudaConfigureCall");
-      if (cudaConfigureCall == nullptr) {
-        return false;
-      }
-
       findOrInsertRuntimeFunctions(M);
 
-      for (auto* user : cudaConfigureCall->users()) {
-        if (auto *call = dyn_cast<CallInst>(user)) {
-          patchKernelCall(call);
-        }
+      for (auto &kcall : getAnalysis<LocateKCallsPass>().getLaunches()) {
+        patchKernelCall(kcall.configureCall, kcall.kernelLaunch, kcall.kernelName);
       }
 
       return true;
