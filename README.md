@@ -13,14 +13,16 @@ and two additional flags.
 Let `$BASE` be a variable containing the base path of your llvm installation (so clang
 can be found as `$BASE/bin/clang`), then the required flags are:
 
-1. `-fplugin=$BASE/lib/LLVMMemtrace` for the compilation of every `.cu` file. This
-	instruments host and device code to emit traces.
+1. `-fplugin=$BASE/lib/LLVMMemtrace.so` for the compilation of every `.cu` file. This
+	instruments host and device code to emit traces. E.g.
+    `$ clang++ -fplugin=$BASE/lib/LLVMMemtrace.so --cuda-path=... --cuda-gpu-arch=sm_30 -c -o code.o code.cu`
 2. `$BASE/lib/libmemtrace-host.o` when linking your application. This links the host
 	side runtime (receiving traces from devices and writing them to disk) into
-	your application.
+	your application. E.g.
+    `$ clang++ -o application code.o $BASE/lib/libmemtrace-host.o`
 
 Afterwards, just run your application.
-Traces are written to files named `<your aplication>-<CUDA stream number>.trc`.
+Traces are written to files named `<your application>-<CUDA stream number>.trc`.
 One file is created per stream.
 
 You can take a quick look at your traces by using the tool `$BASE/bin/cutracedump`.
