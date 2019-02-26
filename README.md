@@ -9,13 +9,13 @@ provide an io utils in a header only library.
 In order to add tracing to your CUDA application, you can compile CUDA applications
 using clang as described in the
 (official manual)[https://prereleases.llvm.org/7.0.0/rc2/docs/CompileCudaWithLLVM.html]
-and two additional flags.
+and two additional flags (using at least `-O1` might be necessary for some applications).
 Let `$BASE` be a variable containing the base path of your llvm installation (so clang
 can be found as `$BASE/bin/clang`), then the required flags are:
 
 1. `-fplugin=$BASE/lib/LLVMMemtrace.so` for the compilation of every `.cu` file. This
 	instruments host and device code to emit traces. E.g.
-    `$ clang++ -fplugin=$BASE/lib/LLVMMemtrace.so --cuda-path=... --cuda-gpu-arch=sm_30 -c -o code.o code.cu`
+    `$ clang++ -fplugin=$BASE/lib/LLVMMemtrace.so --cuda-path=... --cuda-gpu-arch=sm_30 -O1 -c -o code.o code.cu`
 2. `$BASE/lib/libmemtrace-host.o` when linking your application. This links the host
 	side runtime (receiving traces from devices and writing them to disk) into
 	your application. E.g.
