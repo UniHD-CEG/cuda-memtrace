@@ -43,8 +43,11 @@ class RangeList:
         return self.data.islice(start = 0)
 
 def read_entry(f):
+    """ Read a single entry of trace file f.
+    """
     kinds={0:'loads', 1:'stores', 2:'atomics'}
     mark = f.read(1)
+    # kernel start mark
     if mark == b'\x00':
         buf = f.read(2)
         size, = struct.unpack('H', buf)
@@ -52,6 +55,7 @@ def read_entry(f):
         return 'kernel', {
                     'name': kernelname,
                 }
+    # single access mark
     elif mark == b'\xff':
         buf = f.read(24)
         f1, f2, f3 = struct.unpack('QQQ', buf)
@@ -71,6 +75,7 @@ def read_entry(f):
                     'cta': (ctax, ctay, ctaz),
                     'count': 1,
                 }
+    # run-length encoded access mark
     elif mark == b'\xfe':
         buf = f.read(24 + 2)
         f1, f2, f3, count = struct.unpack('QQQH', buf)
@@ -90,15 +95,21 @@ def read_entry(f):
                     'cta': (ctax, ctay, ctaz),
                     'count': count,
                 }
+    # eof reached
     elif mark == b'':
         return 'eof', None
     else:
         return 'invalid', { 'byte': mark, 'pos': f.tell() }
 
 def open_database(path):
+    """Open SQLite database specified by path, configure connection and
+    create tables if they don't exist.
+    """
     db = sqlite3.connect(path, timeout = 600)
+    # massively improves commit performance, introduces risk of corrupt
+    # Database on machine/OS crash or power out. Application crashes still
+    # don't corrupt database.
     db.execute('PRAGMA synchronous = OFF;')
-    db.execute('PRAGMA foreign_keys = ON;')
     #db.set_trace_callback(print)
 
     db.execute("""CREATE TABLE IF NOT EXISTS kernels
@@ -122,6 +133,8 @@ def open_database(path):
     return db
 
 def write_kernel(db, kernel, tag):
+    """Serialize kernel object into database under specified tag.
+    """
     id = db.execute("INSERT INTO kernels (tag, kernel, launch)"
         "  VALUES(?, ?, ?);", (tag, kernel['name'], kernel['launch'])).lastrowid
     for (x, y, z) in kernel['ctas']:
@@ -133,8 +146,18 @@ def write_kernel(db, kernel, tag):
                     (id, x,y,z, k, start, stop))
 
 
-# structure: { name: string, launch: num, ctas: { (x,y,z) : {loads, stores, atomics} } }
-# (db, tag, kernel, entry) -> kernel
+# Kernel object : {
+#   'name': string,
+#   'launch': num,
+#   'ctas': {
+#     (x, y, z) : {
+#       'loads': RangeList,
+#       'stores': RangeList,
+#       'atomics': RangeList
+#     }
+#   }
+# }
+
 def handle_kernel(kernel, entry):
     launch = 0 if kernel == None else kernel['launch'] + 1
     return {
@@ -181,7 +204,9 @@ def main(argv):
         while True:
             kind, entry = read_entry(trace)
             if kind == 'kernel':
-                if kernel != None: write_kernel(db, kernel, tag)
+                if kernel != None:
+                    write_kernel(db, kernel, tag)
+                    db.commit()
                 kernel = handle_kernel(kernel, entry)
             elif kind == 'record':
                 kernel = handle_record(kernel, entry)
@@ -191,8 +216,9 @@ def main(argv):
             else:
                 print('invalid entry in trace file')
                 return 1
-        if kernel != None: write_kernel(db, kernel, tag)
-        db.commit()
+        if kernel != None:
+            write_kernel(db, kernel, tag)
+            db.commit()
 
 if __name__ == "__main__":
     sys.exit(main(sys.argv))
