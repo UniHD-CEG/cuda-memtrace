@@ -6,14 +6,12 @@ add_llvm_loadable_module(LLVMMemtrace
   InstrumentDevice.cpp
   LocateKCalls.cpp
 
-  LinkHostSupport.cpp
   InstrumentHost.cpp
 
   RegisterStandardPasses.cpp
   )
 add_dependencies(LLVMMemtrace
   memtrace-device-utils
-  #memtrace-host-utils
   libmemtrace-host-o
   )
 
