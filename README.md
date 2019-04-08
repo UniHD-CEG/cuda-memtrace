@@ -28,6 +28,14 @@ One file is created per stream.
 You can take a quick look at your traces by using the tool `$BASE/bin/cutracedump`.
 Its source code can also be used as a reference for your own analysis tools.
 
+# Compatibility
+
+The memtrace was developed and tested against LLVM commit `a5b9a59`, Clang
+commit `f3e3e06` and CUDA SDK 8.
+It should work with a release LLVM+Clang of version 7.x.x, but problems when
+building against other major versions of LLVM/Clang are expected due to the
+quick development cycles and API changes of LLVM.
+
 # Building
 
 The Memtracer is an external project to LLVM, so for the most part follow the
