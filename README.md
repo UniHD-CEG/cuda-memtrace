@@ -8,7 +8,7 @@ provide an io utils in a header only library.
 
 In order to add tracing to your CUDA application, you can compile CUDA applications
 using clang as described in the
-(official manual)[https://prereleases.llvm.org/7.0.0/rc2/docs/CompileCudaWithLLVM.html]
+[official manual](https://prereleases.llvm.org/7.0.0/rc2/docs/CompileCudaWithLLVM.html)
 and two additional flags (using at least `-O1` might be necessary for some applications).
 Let `$BASE` be a variable containing the base path of your llvm installation (so clang
 can be found as `$BASE/bin/clang`), then the required flags are:
