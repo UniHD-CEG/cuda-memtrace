@@ -32,36 +32,72 @@ Its source code can also be used as a reference for your own analysis tools.
 
 The memtrace was developed and tested against LLVM commit `a5b9a59`, Clang
 commit `f3e3e06` and CUDA SDK 8.
-It should work with a release LLVM+Clang of version 7.x.x, but problems when
-building against other major versions of LLVM/Clang are expected due to the
-quick development cycles and API changes of LLVM.
+It has been superficially tested against the LLVM+Clang release 7.0, we expect
+incompatibilietes when building against different version due to frequent API
+changes.
 
 # Building
 
-The Memtracer is an external project to LLVM, so for the most part follow the
-official
-(LLVM 7 Getting Started Guide)[https://prereleases.llvm.org/7.0.0/rc2/docs/GettingStarted.html].
-except for these changes:
+The Memtracer is an external project to LLVM (like Clang) that lives in the 
+`tools` directory of the llvm tree (also like Clang).
+The build process from the official 
+[LLVM 7 Getting Started Guide](https://prereleases.llvm.org/7.0.0/rc2/docs/GettingStarted.html)
+is staying the same with some requirements to the build.
 
-before running cmake, clone mekong into your llvm/tools directory, just
-like clang, e.g.:
+First, download and checkout llvm, clang, and the memtracer e.g.:
 
-```
+```bash
 $ cd where-you-want-llvm-to-live
-$ cd llvm/tools
-$ git clone github.com/unihd-ceg/cuda-memtrace
-```
-
-And then include the project into the building process by adding an
-`add_llvm_external_project` directo to `tools/CMakeLists.txt`.
-
-```
-$ cd where-you-want-llvm-to-live
+$ git clone http://github.com/llvm-mirror/llvm
+#... downloading out llvm repository
 $ cd llvm
-$ echo 'add_llvm_external_project(cuda-memtrace)' >> tools/CMakeLists.txt
+$ git checkout release_70
+#... switching to release 7.0
+$ cd tools # llvm/tools
+$ git clone http://github.com/llvm-mirror/clang
+#... downloading clang
+$ cd clang # llvm/tools/clang
+$ git checkout release_70
+#... switching to release 7.0
+
+# THE FOLLOWING PART IS NEW
+$ cd .. # llvm/tools
+$ git clone github.com/unihd-ceg/cuda-memtrace
+#... downloading cuda-memtrace
 ```
 
-Now you should be able to compile and install llvm as usual.
+Next, add an entry to `llvm/tools/CMakeLists.txt` to make CMake aware of the
+new external project and include it in the build.
+We typically add it after the block containing the other tools, as in the
+following diff:
+
+```diff
+diff --git a/tools/CMakeLists.txt b/tools/CMakeLists.txt                                 
+index b654b8c..7eef359 100644
+--- a/tools/CMakeLists.txt
++++ b/tools/CMakeLists.txt
+@@ -46,6 +46,7 @@ add_llvm_external_project(clang)                                       
+ add_llvm_external_project(llgo)
+ add_llvm_external_project(lld)
+ add_llvm_external_project(lldb)
++add_llvm_external_project(cuda-memtrace)
+
+ # Automatically add remaining sub-directories containing a 'CMakeLists.txt'             
+ # file as external projects.
+```
+
+Lastly, configure and build LLVM.
+The configuration requires the following flags:
+
+- `-DBUILD_SHARED_LIBS=ON` - the memtracer is implemented as a plugin, which
+  currently does not support static builds of LLVM (linker error message:
+  duplicate symbols).
+- `-DMEMTRACE_CUDA_FLAGS=${PATH TO YOUR CUDA INSTALLATION}` - required if your
+  CUDA 8.0 installation is located somewhere other than `/usr/local/cuda` (e.g.
+  `/opt/cuda-8.0`).
+
+The resulting LLVM build includes the memtracer and can be used as described
+above.
 
 # Software Authors
 
