@@ -97,8 +97,9 @@ The configuration requires the following flags:
   duplicate symbols).
 - `-DLLVM_ENABLE_ASSERTIONS=ON` - The current analysis pass to locate kernel
   launch sites relies on the basic block labels set by gpucc. Value/BB labels
-  are only set in +Assert builds, so instrumentation fails with disabled
-  assertions (which is the default).
+  are only set in +Assert builds (or with the `-fno-discard-value-names` clang
+  flag), so instrumentation fails with disabled assertions (which is the
+  default).
 - `-DMEMTRACE_CUDA_FLAGS=${PATH TO YOUR CUDA INSTALLATION}` - required if your
   CUDA 8.0 installation is located somewhere other than `/usr/local/cuda` (e.g.
   `/opt/cuda-8.0`).
