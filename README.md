@@ -35,6 +35,9 @@ commit `f3e3e06` and CUDA SDK 8.
 It has been superficially tested against the LLVM+Clang release 7.0, we expect
 incompatibilietes when building against different version due to frequent API
 changes.
+The monorepo mirror on github likely results in dysfunctional builds, so we
+recommend using the multirepo mirror on `https://github.com/llvm-mirror/{repo}`.
+The cause of this issue has not been determined yet.
 
 # Building
 
@@ -92,6 +95,10 @@ The configuration requires the following flags:
 - `-DBUILD_SHARED_LIBS=ON` - the memtracer is implemented as a plugin, which
   currently does not support static builds of LLVM (linker error message:
   duplicate symbols).
+- `-DLLVM_ENABLE_ASSERTIONS=ON` - The current analysis pass to locate kernel
+  launch sites relies on the basic block labels set by gpucc. Value/BB labels
+  are only set in +Assert builds, so instrumentation fails with disabled
+  assertions (which is the default).
 - `-DMEMTRACE_CUDA_FLAGS=${PATH TO YOUR CUDA INSTALLATION}` - required if your
   CUDA 8.0 installation is located somewhere other than `/usr/local/cuda` (e.g.
   `/opt/cuda-8.0`).
