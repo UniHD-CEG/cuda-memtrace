@@ -1,6 +1,6 @@
 set(LLVM_NO_RTTI 1)
 
-add_llvm_loadable_module(LLVMMemtrace
+add_llvm_library(LLVMMemtrace MODULE
   MarkAllDeviceForInline.cpp
   LinkDeviceSupport.cpp
   InstrumentDevice.cpp
@@ -9,6 +9,9 @@ add_llvm_loadable_module(LLVMMemtrace
   InstrumentHost.cpp
 
   RegisterStandardPasses.cpp
+
+  PLUGIN_TOOL
+  opt
   )
 add_dependencies(LLVMMemtrace
   memtrace-device-utils
