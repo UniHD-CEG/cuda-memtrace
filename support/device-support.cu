@@ -30,7 +30,7 @@ __device__ void __mem_trace (uint8_t* records, uint8_t* allocs, uint8_t* commits
     }
 
     uint32_t slot_offset = slot * SLOTS_SIZE;
-    uint32_t record_offset = __shfl(id, lowest) + rlane_id;
+    uint32_t record_offset = __shfl_sync(0xffffffff, id, lowest) + rlane_id;
     record_t *record = (record_t*) &(records[(slot_offset + record_offset) * RECORD_SIZE]);
     record->desc = desc;
     record->addr = addr;
