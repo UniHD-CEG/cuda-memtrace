@@ -111,3 +111,4 @@ above.
 
 - Alexander Matz
 - Dennis Rieber
+- Georg Weisert
